@@ -1,0 +1,23 @@
+{
+  "serial": {
+    "port": "/dev/ttyS0",
+    "baudrate": 9600,
+    "timeout_seconds": 1,
+    "parity": "even",
+    "bytesize": 7,
+    "stopbits": 1
+  },
+  "storage": {
+    "directory": "/home/adrien/LinkyData",
+    "file_prefix": "Stat_",
+    "date_format": "%d-%m-%Y"
+  },
+  "linky": {
+    "phase_count": 3,
+    "mode": "standard"
+  },
+  "api": {
+    "host": "0.0.0.0",
+    "port": 8080
+  }
+}

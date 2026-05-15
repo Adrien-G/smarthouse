@@ -1,0 +1,16 @@
+[Unit]
+Description=SmartHouse Linky local API
+After=network-online.target smarthouse-linky-reader.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/smarthouse/raspberry
+ExecStart=/usr/bin/python3 /opt/smarthouse/raspberry/api_server.py
+Restart=always
+RestartSec=5
+User=adrien
+Group=adrien
+
+[Install]
+WantedBy=multi-user.target
