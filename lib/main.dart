@@ -432,7 +432,7 @@ class ApiLinkyRepository implements LinkyRepository {
   @override
   Future<InstantConsumptionSnapshot> fetchInstantConsumption() async {
     final data =
-        await _getData('/api/linky/realtime?duration=30m&resolution=minute')
+        await _getData('/api/linky/realtime?duration=30m&resolution=raw')
             as List<dynamic>;
     final rows = data.whereType<Map<String, dynamic>>().toList();
     final points = [
@@ -1135,14 +1135,17 @@ class InstantConsumptionPage extends StatefulWidget {
 }
 
 class _InstantConsumptionPageState extends State<InstantConsumptionPage> {
-  late Future<InstantConsumptionSnapshot> _future;
+  InstantConsumptionSnapshot? _snapshot;
+  Object? _error;
+  var _loadingInitial = true;
+  var _refreshing = false;
   Timer? _timer;
 
   @override
   void initState() {
     super.initState();
-    _future = widget.repository.fetchInstantConsumption();
-    _timer = Timer.periodic(const Duration(seconds: 30), (_) => _refresh());
+    _refresh(showInitialLoading: true);
+    _timer = Timer.periodic(const Duration(seconds: 10), (_) => _refresh());
   }
 
   @override
@@ -1151,65 +1154,107 @@ class _InstantConsumptionPageState extends State<InstantConsumptionPage> {
     super.dispose();
   }
 
-  void _refresh() {
-    if (!mounted) {
+  Future<void> _refresh({bool showInitialLoading = false}) async {
+    if (!mounted || _refreshing) {
       return;
     }
-    setState(() {
-      _future = widget.repository.fetchInstantConsumption();
-    });
+
+    if (showInitialLoading || _snapshot == null) {
+      setState(() {
+        _loadingInitial = true;
+        _error = null;
+      });
+    } else {
+      setState(() {
+        _refreshing = true;
+      });
+    }
+
+    try {
+      final snapshot = await widget.repository.fetchInstantConsumption();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _snapshot = snapshot;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error;
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingInitial = false;
+          _refreshing = false;
+        });
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final compact = MediaQuery.sizeOf(context).width < 720;
+    final snapshot = _snapshot;
 
     return SafeArea(
-      child: FutureBuilder<InstantConsumptionSnapshot>(
-        future: _future,
-        builder: (context, snapshot) {
-          return ListView(
-            padding: EdgeInsets.symmetric(
-              horizontal: compact ? 16 : 28,
-              vertical: 20,
-            ),
-            children: [
-              _InstantHeader(onRefresh: _refresh),
-              const SizedBox(height: 18),
-              if (snapshot.connectionState != ConnectionState.done)
-                const SizedBox(
-                  height: 220,
-                  child: _LoadingView(
-                    message: 'Récupération des 30 dernières minutes...',
-                  ),
-                )
-              else if (snapshot.hasError || !snapshot.hasData)
-                _EmptyHistoryMessage(
-                  icon: Icons.cloud_off,
-                  title: 'Données instantanées indisponibles',
-                  message:
-                      snapshot.error?.toString() ??
-                      'Impossible de charger les dernières mesures.',
-                  action: FilledButton.icon(
-                    onPressed: _refresh,
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Réessayer'),
-                  ),
-                )
-              else
-                _InstantContent(snapshot: snapshot.data!),
+      child: ListView(
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 16 : 28,
+          vertical: 20,
+        ),
+        children: [
+          _InstantHeader(
+            onRefresh: () => _refresh(showInitialLoading: snapshot == null),
+            isRefreshing: _refreshing,
+          ),
+          const SizedBox(height: 18),
+          if (_loadingInitial && snapshot == null)
+            const SizedBox(
+              height: 220,
+              child: _LoadingView(
+                message: 'Récupération des 30 dernières minutes...',
+              ),
+            )
+          else if (snapshot == null)
+            _EmptyHistoryMessage(
+              icon: Icons.cloud_off,
+              title: 'Données instantanées indisponibles',
+              message:
+                  _error?.toString() ??
+                  'Impossible de charger les dernières mesures.',
+              action: FilledButton.icon(
+                onPressed: () => _refresh(showInitialLoading: true),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Réessayer'),
+              ),
+            )
+          else ...[
+            if (_error != null) ...[
+              _InlineStatusMessage(
+                icon: Icons.cloud_off,
+                message:
+                    'Dernière actualisation impossible, affichage conservé.',
+              ),
+              const SizedBox(height: 12),
             ],
-          );
-        },
+            _InstantContent(snapshot: snapshot),
+          ],
+        ],
       ),
     );
   }
 }
 
 class _InstantHeader extends StatelessWidget {
-  const _InstantHeader({required this.onRefresh});
+  const _InstantHeader({required this.onRefresh, required this.isRefreshing});
 
   final VoidCallback onRefresh;
+  final bool isRefreshing;
 
   @override
   Widget build(BuildContext context) {
@@ -1230,7 +1275,7 @@ class _InstantHeader extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                '30 dernières minutes - actualisation 30 s',
+                '30 dernières minutes - actualisation 10 s',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -1238,12 +1283,62 @@ class _InstantHeader extends StatelessWidget {
             ],
           ),
         ),
-        IconButton.filledTonal(
-          onPressed: onRefresh,
-          tooltip: 'Actualiser',
-          icon: const Icon(Icons.refresh),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (isRefreshing) ...[
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2.2),
+              ),
+              const SizedBox(width: 10),
+            ],
+            IconButton.filledTonal(
+              onPressed: isRefreshing ? null : onRefresh,
+              tooltip: 'Actualiser',
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
         ),
       ],
+    );
+  }
+}
+
+class _InlineStatusMessage extends StatelessWidget {
+  const _InlineStatusMessage({required this.icon, required this.message});
+
+  final IconData icon;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xfffffbeb),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xfffde68a)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: const Color(0xff92400e)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: const Color(0xff78350f),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1271,9 +1366,21 @@ class _InstantContent extends StatelessWidget {
           spacing: 10,
           runSpacing: 10,
           children: [
-            _PhaseStat(label: 'Phase 1', valueVa: latest.phase1Va),
-            _PhaseStat(label: 'Phase 2', valueVa: latest.phase2Va),
-            _PhaseStat(label: 'Phase 3', valueVa: latest.phase3Va),
+            _PhaseStat(
+              label: 'Phase 1',
+              averageVa: _averageVa(snapshot.points, (point) => point.phase1Va),
+              trend: _phaseTrend(snapshot.points, (point) => point.phase1Va),
+            ),
+            _PhaseStat(
+              label: 'Phase 2',
+              averageVa: _averageVa(snapshot.points, (point) => point.phase2Va),
+              trend: _phaseTrend(snapshot.points, (point) => point.phase2Va),
+            ),
+            _PhaseStat(
+              label: 'Phase 3',
+              averageVa: _averageVa(snapshot.points, (point) => point.phase3Va),
+              trend: _phaseTrend(snapshot.points, (point) => point.phase3Va),
+            ),
           ],
         ),
         const SizedBox(height: 18),
@@ -1286,7 +1393,43 @@ class _InstantContent extends StatelessWidget {
       ],
     );
   }
+
+  int _averageVa(
+    List<PhaseInstantPoint> points,
+    int Function(PhaseInstantPoint point) readValue,
+  ) {
+    if (points.isEmpty) {
+      return 0;
+    }
+    final total = points.fold<int>(0, (sum, point) => sum + readValue(point));
+    return (total / points.length).round();
+  }
+
+  _PhaseTrend _phaseTrend(
+    List<PhaseInstantPoint> points,
+    int Function(PhaseInstantPoint point) readValue,
+  ) {
+    if (points.length < 4) {
+      return _PhaseTrend.stable;
+    }
+
+    final midpoint = points.length ~/ 2;
+    final startAverage = _averageVa(points.take(midpoint).toList(), readValue);
+    final endAverage = _averageVa(points.skip(midpoint).toList(), readValue);
+    final delta = endAverage - startAverage;
+    final threshold = math.max(80, startAverage * 0.08);
+
+    if (delta > threshold) {
+      return _PhaseTrend.up;
+    }
+    if (delta < -threshold) {
+      return _PhaseTrend.down;
+    }
+    return _PhaseTrend.stable;
+  }
 }
+
+enum _PhaseTrend { up, stable, down }
 
 class _InstantPhasesChart extends StatelessWidget {
   const _InstantPhasesChart({required this.points});
@@ -1493,14 +1636,34 @@ class _InstantPhasesChartPainter extends CustomPainter {
 }
 
 class _PhaseStat extends StatelessWidget {
-  const _PhaseStat({required this.label, required this.valueVa});
+  const _PhaseStat({
+    required this.label,
+    required this.averageVa,
+    required this.trend,
+  });
 
   final String label;
-  final int valueVa;
+  final int averageVa;
+  final _PhaseTrend trend;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final trendColor = switch (trend) {
+      _PhaseTrend.up => const Color(0xffb91c1c),
+      _PhaseTrend.stable => const Color(0xff4b5563),
+      _PhaseTrend.down => const Color(0xff047857),
+    };
+    final trendIcon = switch (trend) {
+      _PhaseTrend.up => Icons.trending_up,
+      _PhaseTrend.stable => Icons.trending_flat,
+      _PhaseTrend.down => Icons.trending_down,
+    };
+    final trendLabel = switch (trend) {
+      _PhaseTrend.up => 'En hausse',
+      _PhaseTrend.stable => 'Stable',
+      _PhaseTrend.down => 'En baisse',
+    };
 
     return SizedBox(
       width: math.min(MediaQuery.sizeOf(context).width - 32, 180),
@@ -1523,12 +1686,27 @@ class _PhaseStat extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                '${(valueVa / 1000).toStringAsFixed(2)} kVA',
+                '${(averageVa / 1000).toStringAsFixed(2)} kVA',
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w900,
                 ),
               ),
-              Text('$valueVa VA', style: theme.textTheme.bodySmall),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Icon(trendIcon, size: 18, color: trendColor),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '$trendLabel - moyenne',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: trendColor,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),

@@ -56,7 +56,7 @@ GET /api/health
 GET /api/linky/current
 GET /api/linky/history?date=2026-05-15
 GET /api/linky/history?date=2026-05-15&resolution=hour
-GET /api/linky/realtime?duration=30m&resolution=minute
+GET /api/linky/realtime?duration=30m&resolution=raw
 GET /api/tempo
 GET /api/config
 PUT /api/config
@@ -71,7 +71,7 @@ Exemples :
 curl http://raspberrypi.local:8080/api/linky/current
 curl http://raspberrypi.local:8080/api/linky/history?date=2026-05-15
 curl "http://raspberrypi.local:8080/api/linky/history?date=2026-05-15&resolution=hour"
-curl "http://raspberrypi.local:8080/api/linky/realtime?duration=30m&resolution=minute"
+curl "http://raspberrypi.local:8080/api/linky/realtime?duration=30m&resolution=raw"
 curl http://raspberrypi.local:8080/api/tempo
 ```
 
@@ -79,6 +79,7 @@ Le parametre `resolution` accepte :
 
 ```text
 raw     toutes les mesures du fichier
+10s     un point toutes les 10 secondes
 minute  un point par minute
 hour    un point par heure
 ```

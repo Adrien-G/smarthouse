@@ -164,12 +164,14 @@ def read_history(date: Optional[str], resolution: str = "raw") -> list[dict[str,
     rows = read_measurements_from_file(path)
     if resolution == "raw":
         return rows
+    if resolution == "10s":
+        return aggregate_measurements(rows, "10s")
     if resolution == "minute":
         return aggregate_measurements(rows, "minute")
     if resolution == "hour":
         return aggregate_measurements(rows, "hour")
 
-    raise ValueError("Resolution attendue : raw, minute ou hour")
+    raise ValueError("Resolution attendue : raw, 10s, minute ou hour")
 
 
 def read_realtime(duration: str = "30m", resolution: str = "raw") -> list[dict[str, Any]]:
@@ -185,10 +187,12 @@ def read_realtime(duration: str = "30m", resolution: str = "raw") -> list[dict[s
 
     if resolution == "raw":
         return selected
+    if resolution == "10s":
+        return aggregate_measurements(selected, "10s")
     if resolution == "minute":
         return aggregate_measurements(selected, "minute")
 
-    raise ValueError("Resolution attendue pour realtime : raw ou minute")
+    raise ValueError("Resolution attendue pour realtime : raw, 10s ou minute")
 
 
 def parse_duration_minutes(value: str) -> int:
@@ -254,7 +258,9 @@ def truncate_datetime(value: datetime, resolution: str) -> datetime:
         return value.replace(minute=0, second=0, microsecond=0)
     if resolution == "minute":
         return value.replace(second=0, microsecond=0)
-    raise ValueError("Resolution attendue : raw, minute ou hour")
+    if resolution == "10s":
+        return value.replace(second=(value.second // 10) * 10, microsecond=0)
+    raise ValueError("Resolution attendue : raw, 10s, minute ou hour")
 
 
 def parse_measurement_timestamp(value: Any) -> Optional[datetime]:
