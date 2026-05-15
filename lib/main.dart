@@ -111,6 +111,7 @@ class LinkySnapshot {
     required this.tempoToday,
     required this.tempoTomorrow,
     required this.hourlyConsumption,
+    required this.missingPastHours,
   });
 
   final DateTime timestamp;
@@ -125,6 +126,7 @@ class LinkySnapshot {
   final TempoDayColor tempoToday;
   final TempoDayColor tempoTomorrow;
   final List<HourlyConsumption> hourlyConsumption;
+  final List<DateTime> missingPastHours;
 
   double get currentPowerKw => powerVa / 1000;
   double get dailyConsumptionKwh => dailyConsumptionWh / 1000;
@@ -486,6 +488,7 @@ class ApiLinkyRepository implements LinkyRepository {
       tempoToday: _tempoColor(current['tariff_label']),
       tempoTomorrow: tempoTomorrow,
       hourlyConsumption: _hourlyConsumption(rows),
+      missingPastHours: _missingPastHours(rows),
     );
   }
 
@@ -535,7 +538,7 @@ class ApiLinkyRepository implements LinkyRepository {
     return rows;
   }
 
-  bool _isSameDay(DateTime left, DateTime right) {
+  static bool _isSameDay(DateTime left, DateTime right) {
     return left.year == right.year &&
         left.month == right.month &&
         left.day == right.day;
@@ -685,6 +688,44 @@ class ApiLinkyRepository implements LinkyRepository {
     ];
   }
 
+  static List<DateTime> _missingPastHours(List<Map<String, dynamic>> rows) {
+    final now = DateTime.now();
+    final currentHour = DateTime(now.year, now.month, now.day, now.hour);
+    final knownHours = <DateTime>{};
+
+    for (final row in rows) {
+      final timestamp = _parseTimestamp(row['timestamp']);
+      if (timestamp == null || !_isSameDay(timestamp, now)) {
+        continue;
+      }
+      knownHours.add(
+        DateTime(
+          timestamp.year,
+          timestamp.month,
+          timestamp.day,
+          timestamp.hour,
+        ),
+      );
+    }
+
+    if (knownHours.isEmpty) {
+      return const [];
+    }
+
+    final sortedHours = knownHours.toList()..sort();
+    final missing = <DateTime>[];
+    for (
+      var hour = sortedHours.first;
+      hour.isBefore(currentHour);
+      hour = hour.add(const Duration(hours: 1))
+    ) {
+      if (!knownHours.contains(hour)) {
+        missing.add(hour);
+      }
+    }
+    return missing;
+  }
+
   static TempoDayColor _tempoColor(Object? label) {
     final value = label?.toString().toUpperCase() ?? '';
     if (value.contains('BLEU') || value.contains('BLUE')) {
@@ -793,6 +834,7 @@ class MockLinkyRepository implements LinkyRepository {
       currentTariffLabel: 'HP BLEU',
       tempoToday: TempoDayColor.blue,
       tempoTomorrow: TempoDayColor.white,
+      missingPastHours: const [],
       hourlyConsumption: [
         for (var index = 0; index < values.length; index++)
           HourlyConsumption(
@@ -1187,6 +1229,13 @@ class _DashboardContent extends StatelessWidget {
               trailing: Text('24 h', style: theme.textTheme.labelLarge),
             ),
           if (_showLegacyMetrics) const SizedBox(height: 12),
+          if (snapshot.missingPastHours.isNotEmpty) ...[
+            _InlineStatusMessage(
+              icon: Icons.manage_search,
+              message: _missingHoursMessage(snapshot.missingPastHours),
+            ),
+            const SizedBox(height: 12),
+          ],
           SizedBox(
             height: compact ? 220 : 280,
             child: _HourlyChart(values: snapshot.hourlyConsumption),
@@ -1194,6 +1243,13 @@ class _DashboardContent extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String _missingHoursMessage(List<DateTime> hours) {
+    final preview = hours.take(4).map((hour) => '${hour.hour}h').join(', ');
+    final suffix = hours.length > 4 ? '...' : '';
+    final plural = hours.length > 1 ? 's' : '';
+    return '${hours.length} heure$plural passée$plural sans donnée dans l’historique : $preview$suffix';
   }
 }
 
@@ -1508,10 +1564,17 @@ class _InstantContent extends StatelessWidget {
 
 enum _PhaseTrend { up, stable, down }
 
-class _InstantPhasesChart extends StatelessWidget {
+class _InstantPhasesChart extends StatefulWidget {
   const _InstantPhasesChart({required this.points});
 
   final List<PhaseInstantPoint> points;
+
+  @override
+  State<_InstantPhasesChart> createState() => _InstantPhasesChartState();
+}
+
+class _InstantPhasesChartState extends State<_InstantPhasesChart> {
+  int? _selectedIndex;
 
   @override
   Widget build(BuildContext context) {
@@ -1523,30 +1586,63 @@ class _InstantPhasesChart extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 18, 14, 12),
-        child: CustomPaint(
-          painter: _InstantPhasesChartPainter(
-            points: points,
-            labelColor: Theme.of(context).colorScheme.onSurfaceVariant,
-            gridColor: const Color(0xffd7ddd3),
-          ),
-          child: const SizedBox.expand(),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapDown: (details) =>
+                  _selectPoint(details.localPosition, constraints.biggest),
+              child: CustomPaint(
+                painter: _InstantPhasesChartPainter(
+                  points: widget.points,
+                  selectedIndex: _selectedIndex,
+                  labelColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                  gridColor: const Color(0xffd7ddd3),
+                ),
+                child: const SizedBox.expand(),
+              ),
+            );
+          },
         ),
       ),
     );
+  }
+
+  void _selectPoint(Offset position, Size size) {
+    if (widget.points.length < 2) {
+      return;
+    }
+
+    const yAxisWidth = _InstantPhasesChartPainter.yAxisWidth;
+    const labelHeight = _InstantPhasesChartPainter.labelHeight;
+    final chartHeight = size.height - labelHeight;
+    final chartWidth = size.width - yAxisWidth;
+    if (position.dy < 0 || position.dy > chartHeight) {
+      return;
+    }
+
+    final ratio = ((position.dx - yAxisWidth) / chartWidth).clamp(0.0, 1.0);
+    setState(() {
+      _selectedIndex = ((widget.points.length - 1) * ratio).round();
+    });
   }
 }
 
 class _InstantPhasesChartPainter extends CustomPainter {
   const _InstantPhasesChartPainter({
     required this.points,
+    required this.selectedIndex,
     required this.labelColor,
     required this.gridColor,
   });
 
   final List<PhaseInstantPoint> points;
+  final int? selectedIndex;
   final Color labelColor;
   final Color gridColor;
 
+  static const labelHeight = 48.0;
+  static const yAxisWidth = 56.0;
   static const _phase1Color = Color(0xffd97706);
   static const _phase2Color = Color(0xff2563eb);
   static const _phase3Color = Color(0xff0f766e);
@@ -1557,8 +1653,6 @@ class _InstantPhasesChartPainter extends CustomPainter {
       return;
     }
 
-    const labelHeight = 48.0;
-    const yAxisWidth = 56.0;
     const yAxisLabelWidth = yAxisWidth - 12;
     final chartHeight = size.height - labelHeight;
     final chartWidth = size.width - yAxisWidth;
@@ -1583,7 +1677,7 @@ class _InstantPhasesChartPainter extends CustomPainter {
       final value = scaleMax * (1 - ratio);
       _drawLabel(
         canvas,
-        _formatVa(value),
+        _formatW(value),
         Offset(yAxisLabelWidth / 2, y - 6),
         align: TextAlign.right,
         width: yAxisLabelWidth,
@@ -1620,8 +1714,50 @@ class _InstantPhasesChartPainter extends CustomPainter {
       scaleMax,
     );
 
+    _drawSelectedPoint(canvas, chartWidth, chartHeight, yAxisWidth, scaleMax);
     _drawTimeLabels(canvas, chartHeight + 8, chartWidth, yAxisWidth);
     _drawLegend(canvas, size, chartHeight + 30);
+  }
+
+  void _drawSelectedPoint(
+    Canvas canvas,
+    double chartWidth,
+    double chartHeight,
+    double yAxisWidth,
+    double scaleMax,
+  ) {
+    final index = selectedIndex;
+    if (index == null || index < 0 || index >= points.length) {
+      return;
+    }
+
+    final point = points[index];
+    final x = yAxisWidth + chartWidth * index / (points.length - 1);
+    final values = [point.phase1Va, point.phase2Va, point.phase3Va];
+    final maxPhaseValue = values.reduce(math.max);
+    final y = chartHeight - (maxPhaseValue / scaleMax) * (chartHeight - 8);
+
+    final guidePaint = Paint()
+      ..color = const Color(0xff111827).withValues(alpha: 0.35)
+      ..strokeWidth = 1.2;
+    canvas.drawLine(Offset(x, 0), Offset(x, chartHeight), guidePaint);
+
+    final markerPaint = Paint()..color = const Color(0xff111827);
+    canvas.drawCircle(Offset(x, y), 4.5, markerPaint);
+
+    _drawTooltip(
+      canvas,
+      anchor: Offset(x, y),
+      lines: [
+        _formatTime(point.timestamp),
+        'P1 ${_formatW(point.phase1Va.toDouble())}',
+        'P2 ${_formatW(point.phase2Va.toDouble())}',
+        'P3 ${_formatW(point.phase3Va.toDouble())}',
+      ],
+      chartWidth: chartWidth,
+      yAxisWidth: yAxisWidth,
+      chartHeight: chartHeight,
+    );
   }
 
   void _drawLine(
@@ -1777,16 +1913,60 @@ class _InstantPhasesChartPainter extends CustomPainter {
     painter.paint(canvas, Offset(center.dx - painter.width / 2, center.dy));
   }
 
-  String _formatVa(double value) {
-    if (value >= 1000) {
-      return '${(value / 1000).toStringAsFixed(1)} kVA';
+  void _drawTooltip(
+    Canvas canvas, {
+    required Offset anchor,
+    required List<String> lines,
+    required double chartWidth,
+    required double yAxisWidth,
+    required double chartHeight,
+  }) {
+    const width = 112.0;
+    final height = 18.0 + lines.length * 16.0;
+    var left = anchor.dx - width / 2;
+    left = left.clamp(yAxisWidth + 4, yAxisWidth + chartWidth - width - 4);
+    var top = anchor.dy - height - 12;
+    if (top < 4) {
+      top = anchor.dy + 12;
     }
-    return '${value.round()} VA';
+    top = top.clamp(4.0, chartHeight - height - 4);
+
+    final rect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(left, top, width, height),
+      const Radius.circular(8),
+    );
+    canvas.drawRRect(
+      rect,
+      Paint()..color = const Color(0xff111827).withValues(alpha: 0.92),
+    );
+
+    for (var index = 0; index < lines.length; index++) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: lines[index],
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: index == 0 ? 0.94 : 0.82),
+            fontSize: index == 0 ? 12 : 11,
+            fontWeight: index == 0 ? FontWeight.w800 : FontWeight.w600,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: width - 16);
+      painter.paint(canvas, Offset(left + 8, top + 8 + index * 16));
+    }
+  }
+
+  String _formatW(double value) {
+    if (value >= 1000) {
+      return '${(value / 1000).toStringAsFixed(1)} kW';
+    }
+    return '${value.round()} W';
   }
 
   @override
   bool shouldRepaint(covariant _InstantPhasesChartPainter oldDelegate) {
     return oldDelegate.points != points ||
+        oldDelegate.selectedIndex != selectedIndex ||
         oldDelegate.labelColor != labelColor ||
         oldDelegate.gridColor != gridColor;
   }
@@ -1843,7 +2023,7 @@ class _PhaseStat extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                '${(averageVa / 1000).toStringAsFixed(2)} kVA',
+                '${(averageVa / 1000).toStringAsFixed(2)} kW',
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w900,
                 ),
@@ -2921,10 +3101,17 @@ class _PowerGauge extends StatelessWidget {
   }
 }
 
-class _HourlyChart extends StatelessWidget {
+class _HourlyChart extends StatefulWidget {
   const _HourlyChart({required this.values});
 
   final List<HourlyConsumption> values;
+
+  @override
+  State<_HourlyChart> createState() => _HourlyChartState();
+}
+
+class _HourlyChartState extends State<_HourlyChart> {
+  int? _selectedIndex;
 
   @override
   Widget build(BuildContext context) {
@@ -2936,32 +3123,70 @@ class _HourlyChart extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 18, 14, 12),
-        child: CustomPaint(
-          painter: _HourlyChartPainter(
-            values: values,
-            barColor: Theme.of(context).colorScheme.primary,
-            gridColor: const Color(0xffd7ddd3),
-            labelColor: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-          child: const SizedBox.expand(),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapDown: (details) =>
+                  _selectBar(details.localPosition, constraints.biggest),
+              child: CustomPaint(
+                painter: _HourlyChartPainter(
+                  values: widget.values,
+                  selectedIndex: _selectedIndex,
+                  barColor: Theme.of(context).colorScheme.primary,
+                  gridColor: const Color(0xffd7ddd3),
+                  labelColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                child: const SizedBox.expand(),
+              ),
+            );
+          },
         ),
       ),
     );
+  }
+
+  void _selectBar(Offset position, Size size) {
+    if (widget.values.isEmpty) {
+      return;
+    }
+
+    const labelHeight = _HourlyChartPainter.labelHeight;
+    const yAxisWidth = _HourlyChartPainter.yAxisWidth;
+    final chartHeight = size.height - labelHeight;
+    final chartWidth = size.width - yAxisWidth;
+    if (position.dy < 0 || position.dy > chartHeight) {
+      return;
+    }
+
+    final gap = size.width < 420 ? 3.0 : 6.0;
+    final barWidth =
+        (chartWidth - gap * (widget.values.length - 1)) / widget.values.length;
+    final rawIndex = ((position.dx - yAxisWidth) / (barWidth + gap)).floor();
+    final index = rawIndex.clamp(0, widget.values.length - 1);
+    setState(() {
+      _selectedIndex = index;
+    });
   }
 }
 
 class _HourlyChartPainter extends CustomPainter {
   const _HourlyChartPainter({
     required this.values,
+    required this.selectedIndex,
     required this.barColor,
     required this.gridColor,
     required this.labelColor,
   });
 
   final List<HourlyConsumption> values;
+  final int? selectedIndex;
   final Color barColor;
   final Color gridColor;
   final Color labelColor;
+
+  static const labelHeight = 24.0;
+  static const yAxisWidth = 56.0;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -2969,8 +3194,6 @@ class _HourlyChartPainter extends CustomPainter {
       return;
     }
 
-    const labelHeight = 24.0;
-    const yAxisWidth = 56.0;
     const yAxisLabelWidth = yAxisWidth - 12;
     final chartHeight = size.height - labelHeight;
     final chartWidth = size.width - yAxisWidth;
@@ -3019,6 +3242,57 @@ class _HourlyChartPainter extends CustomPainter {
         );
       }
     }
+
+    _drawSelectedBar(canvas, chartWidth, chartHeight, yAxisWidth, scaleMax);
+  }
+
+  void _drawSelectedBar(
+    Canvas canvas,
+    double chartWidth,
+    double chartHeight,
+    double yAxisWidth,
+    double scaleMax,
+  ) {
+    final index = selectedIndex;
+    if (index == null || index < 0 || index >= values.length) {
+      return;
+    }
+
+    final gap = chartWidth + yAxisWidth < 420 ? 3.0 : 6.0;
+    final barWidth = (chartWidth - gap * (values.length - 1)) / values.length;
+    final entry = values[index];
+    final height = math.max(
+      4.0,
+      (entry.consumptionWh / scaleMax) * (chartHeight - 8),
+    );
+    final left = yAxisWidth + index * (barWidth + gap);
+    final centerX = left + barWidth / 2;
+    final top = chartHeight - height;
+
+    final markerPaint = Paint()
+      ..color = const Color(0xff111827)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(left - 1, top - 1, barWidth + 2, height + 2),
+        const Radius.circular(5),
+      ),
+      markerPaint,
+    );
+
+    _drawTooltip(
+      canvas,
+      anchor: Offset(centerX, top),
+      lines: [
+        '${entry.hour.hour}h',
+        _formatChartKwh(entry.consumptionWh.toDouble()),
+        entry.tempoColor.label,
+      ],
+      chartWidth: chartWidth,
+      yAxisWidth: yAxisWidth,
+      chartHeight: chartHeight,
+    );
   }
 
   void _drawLabel(
@@ -3038,6 +3312,49 @@ class _HourlyChartPainter extends CustomPainter {
     )..layout(maxWidth: width ?? double.infinity);
 
     painter.paint(canvas, Offset(center.dx - painter.width / 2, center.dy));
+  }
+
+  void _drawTooltip(
+    Canvas canvas, {
+    required Offset anchor,
+    required List<String> lines,
+    required double chartWidth,
+    required double yAxisWidth,
+    required double chartHeight,
+  }) {
+    const width = 104.0;
+    final height = 18.0 + lines.length * 16.0;
+    var left = anchor.dx - width / 2;
+    left = left.clamp(yAxisWidth + 4, yAxisWidth + chartWidth - width - 4);
+    var top = anchor.dy - height - 12;
+    if (top < 4) {
+      top = anchor.dy + 12;
+    }
+    top = top.clamp(4.0, chartHeight - height - 4);
+
+    final rect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(left, top, width, height),
+      const Radius.circular(8),
+    );
+    canvas.drawRRect(
+      rect,
+      Paint()..color = const Color(0xff111827).withValues(alpha: 0.92),
+    );
+
+    for (var index = 0; index < lines.length; index++) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: lines[index],
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: index == 0 ? 0.94 : 0.82),
+            fontSize: index == 0 ? 12 : 11,
+            fontWeight: index == 0 ? FontWeight.w800 : FontWeight.w600,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: width - 16);
+      painter.paint(canvas, Offset(left + 8, top + 8 + index * 16));
+    }
   }
 
   String _formatChartKwh(double value) {
@@ -3060,6 +3377,7 @@ class _HourlyChartPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _HourlyChartPainter oldDelegate) {
     return oldDelegate.values != values ||
+        oldDelegate.selectedIndex != selectedIndex ||
         oldDelegate.barColor != barColor ||
         oldDelegate.gridColor != gridColor ||
         oldDelegate.labelColor != labelColor;
