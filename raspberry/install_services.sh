@@ -14,7 +14,11 @@ fi
 
 echo "Installing SmartHouse Raspberry files to ${TARGET_RASPBERRY_DIR}"
 mkdir -p "${TARGET_RASPBERRY_DIR}"
-cp -r "${SOURCE_DIR}/." "${TARGET_RASPBERRY_DIR}/"
+if [[ "$(realpath "${SOURCE_DIR}")" != "$(realpath "${TARGET_RASPBERRY_DIR}")" ]]; then
+  cp -r "${SOURCE_DIR}/." "${TARGET_RASPBERRY_DIR}/"
+else
+  echo "Source and target are identical; skipping file copy."
+fi
 chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${INSTALL_DIR}"
 
 echo "Installing Python serial dependency..."

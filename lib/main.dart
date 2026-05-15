@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -199,6 +200,35 @@ class HourlyConsumption {
 abstract class LinkyRepository {
   Future<LinkySnapshot> fetchCurrentSnapshot();
   Future<LinkySnapshot> fetchDailySnapshot(DateTime date);
+  Future<InstantConsumptionSnapshot> fetchInstantConsumption();
+}
+
+class PhaseInstantPoint {
+  const PhaseInstantPoint({
+    required this.timestamp,
+    required this.phase1Va,
+    required this.phase2Va,
+    required this.phase3Va,
+  });
+
+  final DateTime timestamp;
+  final int phase1Va;
+  final int phase2Va;
+  final int phase3Va;
+
+  int get totalVa => phase1Va + phase2Va + phase3Va;
+}
+
+class InstantConsumptionSnapshot {
+  const InstantConsumptionSnapshot({
+    required this.updatedAt,
+    required this.points,
+  });
+
+  final DateTime updatedAt;
+  final List<PhaseInstantPoint> points;
+
+  PhaseInstantPoint? get latest => points.isEmpty ? null : points.last;
 }
 
 final _showLegacyMetrics = DateTime.now().year == 0;
@@ -227,16 +257,21 @@ class ApiLinkyRepository implements LinkyRepository {
         await _getData('/api/linky/current') as Map<String, dynamic>;
     final history = await _getHistoryOrEmpty();
     final rows = history.whereType<Map<String, dynamic>>().toList();
+    final tempo = await _getTempoOrNull();
     return _snapshotFromRows(
       current: current,
       rows: rows,
       timestampFallback: DateTime.now(),
+      tempoTomorrow: tempo == null
+          ? TempoDayColor.unknown
+          : _tempoColor(tempo['tomorrow']),
     );
   }
 
   @override
   Future<LinkySnapshot> fetchDailySnapshot(DateTime date) async {
-    final path = '/api/linky/history?date=${_formatApiDate(date)}';
+    final path =
+        '/api/linky/history?date=${_formatApiDate(date)}&resolution=hour';
     final history = await _getData(path) as List<dynamic>;
     final rows = history.whereType<Map<String, dynamic>>().toList();
     if (rows.isEmpty) {
@@ -246,6 +281,30 @@ class ApiLinkyRepository implements LinkyRepository {
       current: rows.last,
       rows: rows,
       timestampFallback: date,
+      tempoTomorrow: TempoDayColor.unknown,
+    );
+  }
+
+  @override
+  Future<InstantConsumptionSnapshot> fetchInstantConsumption() async {
+    final data =
+        await _getData('/api/linky/realtime?duration=30m&resolution=minute')
+            as List<dynamic>;
+    final rows = data.whereType<Map<String, dynamic>>().toList();
+    final points = [
+      for (final row in rows)
+        if (_parseTimestamp(row['timestamp']) != null)
+          PhaseInstantPoint(
+            timestamp: _parseTimestamp(row['timestamp'])!,
+            phase1Va: readInt(row, 'sinsts1_va'),
+            phase2Va: readInt(row, 'sinsts2_va'),
+            phase3Va: readInt(row, 'sinsts3_va'),
+          ),
+    ];
+
+    return InstantConsumptionSnapshot(
+      updatedAt: DateTime.now(),
+      points: points,
     );
   }
 
@@ -253,6 +312,7 @@ class ApiLinkyRepository implements LinkyRepository {
     required Map<String, dynamic> current,
     required List<Map<String, dynamic>> rows,
     required DateTime timestampFallback,
+    required TempoDayColor tempoTomorrow,
   }) {
     final timestamp =
         _parseTimestamp(current['timestamp']) ?? timestampFallback;
@@ -280,9 +340,18 @@ class ApiLinkyRepository implements LinkyRepository {
       subscribedPowerKva: subscribedPowerKva,
       currentTariffLabel: current['tariff_label']?.toString() ?? 'Inconnu',
       tempoToday: _tempoColor(current['tariff_label']),
-      tempoTomorrow: TempoDayColor.unknown,
+      tempoTomorrow: tempoTomorrow,
       hourlyConsumption: _hourlyConsumption(rows),
     );
+  }
+
+  Future<Map<String, dynamic>?> _getTempoOrNull() async {
+    try {
+      final tempo = await _getData('/api/tempo');
+      return tempo is Map<String, dynamic> ? tempo : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   String _formatApiDate(DateTime date) {
@@ -294,7 +363,8 @@ class ApiLinkyRepository implements LinkyRepository {
 
   Future<List<dynamic>> _getHistoryOrEmpty() async {
     try {
-      return await _getData('/api/linky/history') as List<dynamic>;
+      return await _getData('/api/linky/history?resolution=hour')
+          as List<dynamic>;
     } catch (_) {
       return const [];
     }
@@ -446,13 +516,13 @@ class ApiLinkyRepository implements LinkyRepository {
 
   static TempoDayColor _tempoColor(Object? label) {
     final value = label?.toString().toUpperCase() ?? '';
-    if (value.contains('BLEU')) {
+    if (value.contains('BLEU') || value.contains('BLUE')) {
       return TempoDayColor.blue;
     }
-    if (value.contains('BLANC')) {
+    if (value.contains('BLANC') || value.contains('WHITE')) {
       return TempoDayColor.white;
     }
-    if (value.contains('ROUGE')) {
+    if (value.contains('ROUGE') || value.contains('RED')) {
       return TempoDayColor.red;
     }
     return TempoDayColor.unknown;
@@ -484,6 +554,15 @@ class LinkyApiException implements Exception {
 
   @override
   String toString() => message;
+}
+
+class LinkyLoadState {
+  const LinkyLoadState.connecting() : message = 'Connexion au Raspberry...';
+
+  const LinkyLoadState.loadingPeriod(String period)
+    : message = 'Récupération $period...';
+
+  final String message;
 }
 
 class MockLinkyRepository implements LinkyRepository {
@@ -549,6 +628,23 @@ class MockLinkyRepository implements LinkyRepository {
   Future<LinkySnapshot> fetchDailySnapshot(DateTime date) async {
     return fetchCurrentSnapshot();
   }
+
+  @override
+  Future<InstantConsumptionSnapshot> fetchInstantConsumption() async {
+    final now = DateTime.now();
+    return InstantConsumptionSnapshot(
+      updatedAt: now,
+      points: [
+        for (var index = 29; index >= 0; index--)
+          PhaseInstantPoint(
+            timestamp: now.subtract(Duration(minutes: index)),
+            phase1Va: 420 + (index % 5) * 35,
+            phase2Va: 610 + (index % 7) * 28,
+            phase3Va: 380 + (index % 3) * 44,
+          ),
+      ],
+    );
+  }
 }
 
 class SmartHouseHome extends StatefulWidget {
@@ -597,6 +693,10 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
         repository: _repository,
         onChangeApiBaseUrl: _changeApiBaseUrl,
       ),
+      1 => InstantConsumptionPage(
+        key: ValueKey('instant-page-$_apiBaseUrl'),
+        repository: _repository,
+      ),
       _ => HistoryPage(
         key: ValueKey('history-page-$_apiBaseUrl'),
         apiBaseUrl: _apiBaseUrl,
@@ -618,6 +718,11 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
             icon: Icon(Icons.today_outlined),
             selectedIcon: Icon(Icons.today),
             label: "Aujourd'hui",
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.show_chart),
+            selectedIcon: Icon(Icons.show_chart),
+            label: 'Instantané',
           ),
           NavigationDestination(
             icon: Icon(Icons.bar_chart_outlined),
@@ -648,16 +753,37 @@ class EnergyDashboardPage extends StatefulWidget {
 
 class _EnergyDashboardPageState extends State<EnergyDashboardPage> {
   late Future<LinkySnapshot> _snapshotFuture;
+  LinkyLoadState _loadState = const LinkyLoadState.connecting();
 
   @override
   void initState() {
     super.initState();
-    _snapshotFuture = widget.repository.fetchCurrentSnapshot();
+    _snapshotFuture = _loadToday();
   }
 
   void _refresh() {
     setState(() {
-      _snapshotFuture = widget.repository.fetchCurrentSnapshot();
+      _snapshotFuture = _loadToday();
+    });
+  }
+
+  Future<LinkySnapshot> _loadToday() async {
+    _updateLoadState(const LinkyLoadState.connecting());
+    if (widget.repository is ApiLinkyRepository) {
+      await (widget.repository as ApiLinkyRepository).checkHealth();
+    }
+
+    _updateLoadState(const LinkyLoadState.loadingPeriod('des données du jour'));
+    return widget.repository.fetchCurrentSnapshot();
+  }
+
+  void _updateLoadState(LinkyLoadState state) {
+    if (!mounted) {
+      _loadState = state;
+      return;
+    }
+    setState(() {
+      _loadState = state;
     });
   }
 
@@ -673,7 +799,7 @@ class _EnergyDashboardPageState extends State<EnergyDashboardPage> {
           future: _snapshotFuture,
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
-              return const _LoadingView();
+              return _LoadingView(message: _loadState.message);
             }
 
             if (snapshot.hasError || !snapshot.hasData) {
@@ -776,17 +902,430 @@ class _DashboardContent extends StatelessWidget {
               ],
             ),
           const SizedBox(height: 22),
-          _SectionHeader(
-            title: 'Consommation horaire',
-            subtitle: 'Données locales reçues depuis le compteur',
-            trailing: Text('24 h', style: theme.textTheme.labelLarge),
-          ),
-          const SizedBox(height: 12),
+          if (_showLegacyMetrics)
+            _SectionHeader(
+              title: 'Consommation horaire',
+              subtitle: 'Données locales reçues depuis le compteur',
+              trailing: Text('24 h', style: theme.textTheme.labelLarge),
+            ),
+          if (_showLegacyMetrics) const SizedBox(height: 12),
           SizedBox(
             height: compact ? 220 : 280,
             child: _HourlyChart(values: snapshot.hourlyConsumption),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class InstantConsumptionPage extends StatefulWidget {
+  const InstantConsumptionPage({super.key, required this.repository});
+
+  final LinkyRepository repository;
+
+  @override
+  State<InstantConsumptionPage> createState() => _InstantConsumptionPageState();
+}
+
+class _InstantConsumptionPageState extends State<InstantConsumptionPage> {
+  late Future<InstantConsumptionSnapshot> _future;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = widget.repository.fetchInstantConsumption();
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) => _refresh());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _refresh() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _future = widget.repository.fetchInstantConsumption();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 720;
+
+    return SafeArea(
+      child: FutureBuilder<InstantConsumptionSnapshot>(
+        future: _future,
+        builder: (context, snapshot) {
+          return ListView(
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 16 : 28,
+              vertical: 20,
+            ),
+            children: [
+              _InstantHeader(onRefresh: _refresh),
+              const SizedBox(height: 18),
+              if (snapshot.connectionState != ConnectionState.done)
+                const SizedBox(
+                  height: 220,
+                  child: _LoadingView(
+                    message: 'Récupération des 30 dernières minutes...',
+                  ),
+                )
+              else if (snapshot.hasError || !snapshot.hasData)
+                _EmptyHistoryMessage(
+                  icon: Icons.cloud_off,
+                  title: 'Données instantanées indisponibles',
+                  message:
+                      snapshot.error?.toString() ??
+                      'Impossible de charger les dernières mesures.',
+                  action: FilledButton.icon(
+                    onPressed: _refresh,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Réessayer'),
+                  ),
+                )
+              else
+                _InstantContent(snapshot: snapshot.data!),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _InstantHeader extends StatelessWidget {
+  const _InstantHeader({required this.onRefresh});
+
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Instantané',
+                style: theme.textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '30 dernières minutes - actualisation 30 s',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+        IconButton.filledTonal(
+          onPressed: onRefresh,
+          tooltip: 'Actualiser',
+          icon: const Icon(Icons.refresh),
+        ),
+      ],
+    );
+  }
+}
+
+class _InstantContent extends StatelessWidget {
+  const _InstantContent({required this.snapshot});
+
+  final InstantConsumptionSnapshot snapshot;
+
+  @override
+  Widget build(BuildContext context) {
+    final latest = snapshot.latest;
+
+    if (latest == null) {
+      return const _EmptyHistoryMessage(
+        icon: Icons.show_chart,
+        title: 'Pas encore de données',
+        message: 'Aucune mesure disponible sur les 30 dernières minutes.',
+      );
+    }
+
+    return Column(
+      children: [
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            _PhaseStat(label: 'Phase 1', valueVa: latest.phase1Va),
+            _PhaseStat(label: 'Phase 2', valueVa: latest.phase2Va),
+            _PhaseStat(label: 'Phase 3', valueVa: latest.phase3Va),
+          ],
+        ),
+        const SizedBox(height: 18),
+        SizedBox(
+          height: 280,
+          child: _InstantPhasesChart(points: snapshot.points),
+        ),
+        const SizedBox(height: 10),
+        Text('Dernière mesure à ${_formatTime(latest.timestamp)}'),
+      ],
+    );
+  }
+}
+
+class _InstantPhasesChart extends StatelessWidget {
+  const _InstantPhasesChart({required this.points});
+
+  final List<PhaseInstantPoint> points;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xffe1e5dc)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 18, 14, 12),
+        child: CustomPaint(
+          painter: _InstantPhasesChartPainter(
+            points: points,
+            labelColor: Theme.of(context).colorScheme.onSurfaceVariant,
+            gridColor: const Color(0xffd7ddd3),
+          ),
+          child: const SizedBox.expand(),
+        ),
+      ),
+    );
+  }
+}
+
+class _InstantPhasesChartPainter extends CustomPainter {
+  const _InstantPhasesChartPainter({
+    required this.points,
+    required this.labelColor,
+    required this.gridColor,
+  });
+
+  final List<PhaseInstantPoint> points;
+  final Color labelColor;
+  final Color gridColor;
+
+  static const _phase1Color = Color(0xffd97706);
+  static const _phase2Color = Color(0xff2563eb);
+  static const _phase3Color = Color(0xff0f766e);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (points.length < 2) {
+      return;
+    }
+
+    const labelHeight = 24.0;
+    const yAxisWidth = 42.0;
+    final chartHeight = size.height - labelHeight;
+    final chartWidth = size.width - yAxisWidth;
+    final maxValue = points
+        .map(
+          (point) => math.max(
+            point.phase1Va,
+            math.max(point.phase2Va, point.phase3Va),
+          ),
+        )
+        .reduce(math.max);
+    final scaleMax = math.max(500, _roundUpToNiceValue(maxValue));
+    final gridPaint = Paint()
+      ..color = gridColor
+      ..strokeWidth = 1;
+
+    for (var index = 0; index < 3; index++) {
+      final y = chartHeight * index / 2;
+      canvas.drawLine(Offset(yAxisWidth, y), Offset(size.width, y), gridPaint);
+      final value = scaleMax * (2 - index) / 2;
+      _drawLabel(
+        canvas,
+        _formatVa(value),
+        Offset(yAxisWidth - 6, y - 6),
+        align: TextAlign.right,
+        width: yAxisWidth - 8,
+      );
+    }
+
+    _drawLine(
+      canvas,
+      points.map((p) => p.phase1Va).toList(),
+      _phase1Color,
+      chartWidth,
+      chartHeight,
+      yAxisWidth,
+      scaleMax,
+    );
+    _drawLine(
+      canvas,
+      points.map((p) => p.phase2Va).toList(),
+      _phase2Color,
+      chartWidth,
+      chartHeight,
+      yAxisWidth,
+      scaleMax,
+    );
+    _drawLine(
+      canvas,
+      points.map((p) => p.phase3Va).toList(),
+      _phase3Color,
+      chartWidth,
+      chartHeight,
+      yAxisWidth,
+      scaleMax,
+    );
+
+    _drawLegend(canvas, size, chartHeight + 8);
+  }
+
+  void _drawLine(
+    Canvas canvas,
+    List<int> values,
+    Color color,
+    double chartWidth,
+    double chartHeight,
+    double yAxisWidth,
+    int scaleMax,
+  ) {
+    final path = Path();
+    for (var index = 0; index < values.length; index++) {
+      final x = yAxisWidth + chartWidth * index / (values.length - 1);
+      final y = chartHeight - (values[index] / scaleMax) * (chartHeight - 8);
+      if (index == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.4
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+  }
+
+  void _drawLegend(Canvas canvas, Size size, double y) {
+    final items = [
+      ('P1', _phase1Color),
+      ('P2', _phase2Color),
+      ('P3', _phase3Color),
+    ];
+    var x = 46.0;
+    for (final item in items) {
+      final paint = Paint()..color = item.$2;
+      canvas.drawCircle(Offset(x, y + 7), 4, paint);
+      _drawLabel(canvas, item.$1, Offset(x + 20, y), width: 24);
+      x += 52;
+    }
+  }
+
+  void _drawLabel(
+    Canvas canvas,
+    String text,
+    Offset center, {
+    TextAlign align = TextAlign.center,
+    double? width,
+  }) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(color: labelColor, fontSize: 11),
+      ),
+      textDirection: TextDirection.ltr,
+      textAlign: align,
+    )..layout(maxWidth: width ?? double.infinity);
+
+    painter.paint(canvas, Offset(center.dx - painter.width / 2, center.dy));
+  }
+
+  int _roundUpToNiceValue(int value) {
+    if (value <= 500) {
+      return 500;
+    }
+    final magnitude = math.pow(10, value.toString().length - 1).toInt();
+    final normalized = value / magnitude;
+    final niceNormalized = normalized <= 2
+        ? 2
+        : normalized <= 5
+        ? 5
+        : 10;
+    return niceNormalized * magnitude;
+  }
+
+  String _formatVa(double value) {
+    if (value >= 1000) {
+      return '${(value / 1000).toStringAsFixed(1)} kVA';
+    }
+    return '${value.round()} VA';
+  }
+
+  @override
+  bool shouldRepaint(covariant _InstantPhasesChartPainter oldDelegate) {
+    return oldDelegate.points != points ||
+        oldDelegate.labelColor != labelColor ||
+        oldDelegate.gridColor != gridColor;
+  }
+}
+
+class _PhaseStat extends StatelessWidget {
+  const _PhaseStat({required this.label, required this.valueVa});
+
+  final String label;
+  final int valueVa;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return SizedBox(
+      width: math.min(MediaQuery.sizeOf(context).width - 32, 180),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xffe1e5dc)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${(valueVa / 1000).toStringAsFixed(2)} kVA',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              Text('$valueVa VA', style: theme.textTheme.bodySmall),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -811,6 +1350,7 @@ class HistoryPage extends StatefulWidget {
 class _HistoryPageState extends State<HistoryPage> {
   late LinkyRepository _repository;
   late Future<LinkySnapshot> _snapshotFuture;
+  LinkyLoadState _loadState = const LinkyLoadState.connecting();
   var _range = HistoryRange.day;
   DateTime _selectedDate = DateTime.now();
 
@@ -818,12 +1358,32 @@ class _HistoryPageState extends State<HistoryPage> {
   void initState() {
     super.initState();
     _repository = widget.repository;
-    _snapshotFuture = _repository.fetchDailySnapshot(_selectedDate);
+    _snapshotFuture = _loadSelectedDate();
   }
 
   void _reload() {
     setState(() {
-      _snapshotFuture = _repository.fetchDailySnapshot(_selectedDate);
+      _snapshotFuture = _loadSelectedDate();
+    });
+  }
+
+  Future<LinkySnapshot> _loadSelectedDate() async {
+    _updateLoadState(const LinkyLoadState.connecting());
+    if (_repository is ApiLinkyRepository) {
+      await (_repository as ApiLinkyRepository).checkHealth();
+    }
+
+    _updateLoadState(const LinkyLoadState.loadingPeriod('de la journée'));
+    return _repository.fetchDailySnapshot(_selectedDate);
+  }
+
+  void _updateLoadState(LinkyLoadState state) {
+    if (!mounted) {
+      _loadState = state;
+      return;
+    }
+    setState(() {
+      _loadState = state;
     });
   }
 
@@ -840,7 +1400,7 @@ class _HistoryPageState extends State<HistoryPage> {
 
     setState(() {
       _selectedDate = picked;
-      _snapshotFuture = _repository.fetchDailySnapshot(_selectedDate);
+      _snapshotFuture = _loadSelectedDate();
     });
   }
 
@@ -874,7 +1434,10 @@ class _HistoryPageState extends State<HistoryPage> {
               if (_range == HistoryRange.week)
                 const _HistoryPlaceholder()
               else if (snapshot.connectionState != ConnectionState.done)
-                const SizedBox(height: 220, child: _LoadingView())
+                SizedBox(
+                  height: 220,
+                  child: _LoadingView(message: _loadState.message),
+                )
               else if (snapshot.hasError || !snapshot.hasData)
                 _HistoryError(error: snapshot.error, onRetry: _reload)
               else
@@ -2068,17 +2631,19 @@ class _SectionHeader extends StatelessWidget {
 }
 
 class _LoadingView extends StatelessWidget {
-  const _LoadingView();
+  const _LoadingView({required this.message});
+
+  final String message;
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          CircularProgressIndicator(),
-          SizedBox(height: 14),
-          Text('Connexion au Raspberry...'),
+          const CircularProgressIndicator(),
+          const SizedBox(height: 14),
+          Text(message),
         ],
       ),
     );

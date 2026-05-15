@@ -14,16 +14,13 @@ void main() {
     expect(find.text("Aujourd'hui"), findsWidgets);
     expect(find.text('Heures pleines'), findsOneWidget);
     expect(find.text('Heures creuses'), findsOneWidget);
-
-    await tester.drag(find.byType(Scrollable), const Offset(0, -700));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Consommation horaire'), findsOneWidget);
+    expect(find.byType(CustomPaint), findsWidgets);
 
     await tester.tap(find.text('Historique'));
     await tester.pumpAndSettle();
 
     expect(find.text('Consommation passée'), findsOneWidget);
     expect(find.text('Jour'), findsWidgets);
+    expect(find.text('Répartition horaire'), findsOneWidget);
   });
 }
