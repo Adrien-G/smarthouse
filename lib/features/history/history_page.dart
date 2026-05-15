@@ -1,4 +1,11 @@
-part of '../../main.dart';
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+import '../../data/api_linky_repository.dart';
+import '../../models/linky_models.dart';
+import '../../shared/shared_widgets.dart';
+import '../today/today_page.dart';
 
 enum HistoryRange { day, week }
 
@@ -265,7 +272,7 @@ class _HistoryDayContent extends StatelessWidget {
         const SizedBox(height: 12),
         SizedBox(
           height: 280,
-          child: _HourlyChart(values: snapshot.hourlyConsumption),
+          child: HourlyChart(values: snapshot.hourlyConsumption),
         ),
       ],
     );

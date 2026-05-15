@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:smarthouse/app/smart_house_app.dart';
 import 'package:smarthouse/data/mock_linky_repository.dart';
-
-import 'package:smarthouse/main.dart';
 
 void main() {
   testWidgets('today dashboard renders key Linky metrics', (tester) async {

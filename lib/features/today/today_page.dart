@@ -1,4 +1,10 @@
-part of '../../main.dart';
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+import '../../data/api_linky_repository.dart';
+import '../../models/linky_models.dart';
+import '../../shared/shared_widgets.dart';
 
 class EnergyDashboardPage extends StatefulWidget {
   const EnergyDashboardPage({
@@ -260,7 +266,7 @@ class _DashboardContent extends StatelessWidget {
           ],
           SizedBox(
             height: compact ? 220 : 280,
-            child: _HourlyChart(values: snapshot.hourlyConsumption),
+            child: HourlyChart(values: snapshot.hourlyConsumption),
           ),
         ],
       ),
@@ -908,16 +914,16 @@ class _PowerGauge extends StatelessWidget {
   }
 }
 
-class _HourlyChart extends StatefulWidget {
-  const _HourlyChart({required this.values});
+class HourlyChart extends StatefulWidget {
+  const HourlyChart({super.key, required this.values});
 
   final List<HourlyConsumption> values;
 
   @override
-  State<_HourlyChart> createState() => _HourlyChartState();
+  State<HourlyChart> createState() => _HourlyChartState();
 }
 
-class _HourlyChartState extends State<_HourlyChart> {
+class _HourlyChartState extends State<HourlyChart> {
   int? _selectedIndex;
 
   @override

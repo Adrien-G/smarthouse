@@ -1,4 +1,13 @@
-part of '../main.dart';
+import 'package:flutter/material.dart';
+
+import '../data/api_linky_repository.dart';
+import '../data/hourly_history_cache.dart';
+import '../features/history/history_page.dart';
+import '../features/instant/instant_page.dart';
+import '../features/today/today_page.dart';
+import '../models/linky_models.dart';
+import '../shared/shared_widgets.dart';
+import 'app_settings.dart';
 
 class SmartHouseApp extends StatelessWidget {
   const SmartHouseApp({

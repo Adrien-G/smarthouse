@@ -1,4 +1,10 @@
-part of '../../main.dart';
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+import '../../models/linky_models.dart';
+import '../../shared/shared_widgets.dart';
 
 class InstantConsumptionPage extends StatefulWidget {
   const InstantConsumptionPage({super.key, required this.repository});
