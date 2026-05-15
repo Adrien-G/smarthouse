@@ -209,7 +209,7 @@ class ApiLinkyRepository implements LinkyRepository {
       'LINKY_API_BASE_URL',
       defaultValue: defaultBaseUrl,
     ),
-    this.timeout = const Duration(seconds: 3),
+    this.timeout = const Duration(seconds: 8),
     this.subscribedPowerKva = 15,
     this.energyPrices = TempoEnergyPrices.esStrasbourg20250801,
   });
@@ -223,7 +223,6 @@ class ApiLinkyRepository implements LinkyRepository {
 
   @override
   Future<LinkySnapshot> fetchCurrentSnapshot() async {
-    await checkHealth();
     final current =
         await _getData('/api/linky/current') as Map<String, dynamic>;
     final history = await _getHistoryOrEmpty();
@@ -237,7 +236,6 @@ class ApiLinkyRepository implements LinkyRepository {
 
   @override
   Future<LinkySnapshot> fetchDailySnapshot(DateTime date) async {
-    await checkHealth();
     final path = '/api/linky/history?date=${_formatApiDate(date)}';
     final history = await _getData(path) as List<dynamic>;
     final rows = history.whereType<Map<String, dynamic>>().toList();
@@ -569,23 +567,45 @@ class SmartHouseHome extends StatefulWidget {
 
 class _SmartHouseHomeState extends State<SmartHouseHome> {
   var _selectedIndex = 0;
+  late String _apiBaseUrl;
+  late LinkyRepository _repository;
+
+  @override
+  void initState() {
+    super.initState();
+    _apiBaseUrl = widget.initialApiBaseUrl;
+    _repository = widget.repository ?? ApiLinkyRepository(baseUrl: _apiBaseUrl);
+  }
+
+  Future<void> _changeApiBaseUrl(String value) async {
+    final normalized = _normalizeApiBaseUrlValue(value);
+    await AppSettings(apiBaseUrl: normalized).save();
+
+    setState(() {
+      _apiBaseUrl = normalized;
+      _repository =
+          widget.repository ?? ApiLinkyRepository(baseUrl: normalized);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: [
-          EnergyDashboardPage(
-            initialApiBaseUrl: widget.initialApiBaseUrl,
-            repository: widget.repository,
-          ),
-          HistoryPage(
-            initialApiBaseUrl: widget.initialApiBaseUrl,
-            repository: widget.repository,
-          ),
-        ],
+    final page = switch (_selectedIndex) {
+      0 => EnergyDashboardPage(
+        key: ValueKey('today-page-$_apiBaseUrl'),
+        apiBaseUrl: _apiBaseUrl,
+        repository: _repository,
+        onChangeApiBaseUrl: _changeApiBaseUrl,
       ),
+      _ => HistoryPage(
+        key: ValueKey('history-page-$_apiBaseUrl'),
+        apiBaseUrl: _apiBaseUrl,
+        repository: _repository,
+      ),
+    };
+
+    return Scaffold(
+      body: page,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
@@ -613,12 +633,14 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
 class EnergyDashboardPage extends StatefulWidget {
   const EnergyDashboardPage({
     super.key,
-    required this.initialApiBaseUrl,
-    this.repository,
+    required this.apiBaseUrl,
+    required this.repository,
+    required this.onChangeApiBaseUrl,
   });
 
-  final String initialApiBaseUrl;
-  final LinkyRepository? repository;
+  final String apiBaseUrl;
+  final LinkyRepository repository;
+  final ValueChanged<String> onChangeApiBaseUrl;
 
   @override
   State<EnergyDashboardPage> createState() => _EnergyDashboardPageState();
@@ -626,37 +648,21 @@ class EnergyDashboardPage extends StatefulWidget {
 
 class _EnergyDashboardPageState extends State<EnergyDashboardPage> {
   late Future<LinkySnapshot> _snapshotFuture;
-  late String _apiBaseUrl;
-  late LinkyRepository _repository;
 
   @override
   void initState() {
     super.initState();
-    _apiBaseUrl = widget.initialApiBaseUrl;
-    _repository = widget.repository ?? ApiLinkyRepository(baseUrl: _apiBaseUrl);
-    _snapshotFuture = _repository.fetchCurrentSnapshot();
+    _snapshotFuture = widget.repository.fetchCurrentSnapshot();
   }
 
   void _refresh() {
     setState(() {
-      _snapshotFuture = _repository.fetchCurrentSnapshot();
+      _snapshotFuture = widget.repository.fetchCurrentSnapshot();
     });
   }
 
   Future<void> _changeApiBaseUrl(String value) async {
-    final normalized = _normalizeApiBaseUrl(value);
-    await AppSettings(apiBaseUrl: normalized).save();
-
-    setState(() {
-      _apiBaseUrl = normalized;
-      _repository =
-          widget.repository ?? ApiLinkyRepository(baseUrl: normalized);
-      _snapshotFuture = _repository.fetchCurrentSnapshot();
-    });
-  }
-
-  String _normalizeApiBaseUrl(String value) {
-    return _normalizeApiBaseUrlValue(value);
+    widget.onChangeApiBaseUrl(value);
   }
 
   @override
@@ -672,7 +678,7 @@ class _EnergyDashboardPageState extends State<EnergyDashboardPage> {
 
             if (snapshot.hasError || !snapshot.hasData) {
               return _ErrorView(
-                apiBaseUrl: _apiBaseUrl,
+                apiBaseUrl: widget.apiBaseUrl,
                 error: snapshot.error,
                 onRetry: _refresh,
                 onChangeApiBaseUrl: _changeApiBaseUrl,
@@ -681,7 +687,7 @@ class _EnergyDashboardPageState extends State<EnergyDashboardPage> {
 
             return _DashboardContent(
               snapshot: snapshot.data!,
-              apiBaseUrl: _apiBaseUrl,
+              apiBaseUrl: widget.apiBaseUrl,
               onRefresh: _refresh,
               onChangeApiBaseUrl: _changeApiBaseUrl,
             );
@@ -791,12 +797,12 @@ enum HistoryRange { day, week }
 class HistoryPage extends StatefulWidget {
   const HistoryPage({
     super.key,
-    required this.initialApiBaseUrl,
-    this.repository,
+    required this.apiBaseUrl,
+    required this.repository,
   });
 
-  final String initialApiBaseUrl;
-  final LinkyRepository? repository;
+  final String apiBaseUrl;
+  final LinkyRepository repository;
 
   @override
   State<HistoryPage> createState() => _HistoryPageState();
@@ -811,9 +817,7 @@ class _HistoryPageState extends State<HistoryPage> {
   @override
   void initState() {
     super.initState();
-    _repository =
-        widget.repository ??
-        ApiLinkyRepository(baseUrl: widget.initialApiBaseUrl);
+    _repository = widget.repository;
     _snapshotFuture = _repository.fetchDailySnapshot(_selectedDate);
   }
 
