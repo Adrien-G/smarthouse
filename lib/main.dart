@@ -1570,7 +1570,7 @@ class _InstantPhasesChartPainter extends CustomPainter {
           ),
         )
         .reduce(math.max);
-    final scaleMax = math.max(500, _roundUpToNiceValue(maxValue));
+    final scaleMax = math.max(100.0, maxValue.toDouble());
     final gridPaint = Paint()
       ..color = gridColor
       ..strokeWidth = 1;
@@ -1589,6 +1589,8 @@ class _InstantPhasesChartPainter extends CustomPainter {
         width: yAxisLabelWidth,
       );
     }
+
+    _drawVerticalGrid(canvas, chartWidth, chartHeight, yAxisWidth, gridPaint);
 
     _drawLine(
       canvas,
@@ -1629,7 +1631,7 @@ class _InstantPhasesChartPainter extends CustomPainter {
     double chartWidth,
     double chartHeight,
     double yAxisWidth,
-    int scaleMax,
+    double scaleMax,
   ) {
     final path = Path();
     for (var index = 0; index < values.length; index++) {
@@ -1674,18 +1676,86 @@ class _InstantPhasesChartPainter extends CustomPainter {
     double chartWidth,
     double yAxisWidth,
   ) {
-    final first = points.first.timestamp;
-    final middle = points[points.length ~/ 2].timestamp;
-    final last = points.last.timestamp;
-    final labels = [
-      (_formatTime(first), yAxisWidth + 20),
-      (_formatTime(middle), yAxisWidth + chartWidth / 2),
-      (_formatTime(last), yAxisWidth + chartWidth - 20),
-    ];
-
-    for (final label in labels) {
-      _drawLabel(canvas, label.$1, Offset(label.$2, y), width: 44);
+    for (final marker in _timeMarkers(chartWidth, yAxisWidth)) {
+      final x = marker.x.clamp(yAxisWidth + 24, yAxisWidth + chartWidth - 24);
+      _drawLabel(
+        canvas,
+        _formatTime(marker.timestamp),
+        Offset(x, y),
+        width: 48,
+      );
     }
+  }
+
+  void _drawVerticalGrid(
+    Canvas canvas,
+    double chartWidth,
+    double chartHeight,
+    double yAxisWidth,
+    Paint paint,
+  ) {
+    for (final marker in _timeMarkers(chartWidth, yAxisWidth)) {
+      canvas.drawLine(
+        Offset(marker.x, 0),
+        Offset(marker.x, chartHeight),
+        paint,
+      );
+    }
+  }
+
+  List<({DateTime timestamp, double x})> _timeMarkers(
+    double chartWidth,
+    double yAxisWidth,
+  ) {
+    final first = points.first.timestamp;
+    final last = points.last.timestamp;
+    final totalSeconds = last.difference(first).inSeconds;
+    if (totalSeconds <= 0) {
+      return [(timestamp: first, x: yAxisWidth)];
+    }
+
+    final markers = <({DateTime timestamp, double x})>[];
+    var cursor = _ceilToFiveMinutes(first);
+    while (!cursor.isAfter(last)) {
+      final elapsedSeconds = cursor.difference(first).inSeconds;
+      final ratio = elapsedSeconds / totalSeconds;
+      markers.add((timestamp: cursor, x: yAxisWidth + chartWidth * ratio));
+      cursor = cursor.add(const Duration(minutes: 5));
+    }
+
+    if (markers.length >= 2) {
+      return markers;
+    }
+
+    return [
+      (timestamp: first, x: yAxisWidth),
+      (timestamp: last, x: yAxisWidth + chartWidth),
+    ];
+  }
+
+  DateTime _ceilToFiveMinutes(DateTime value) {
+    final minuteRemainder = value.minute % 5;
+    final alreadyAligned =
+        minuteRemainder == 0 && value.second == 0 && value.millisecond == 0;
+    if (alreadyAligned) {
+      return DateTime(
+        value.year,
+        value.month,
+        value.day,
+        value.hour,
+        value.minute,
+      );
+    }
+
+    final minutesToAdd = minuteRemainder == 0 ? 5 : 5 - minuteRemainder;
+    final rounded = DateTime(
+      value.year,
+      value.month,
+      value.day,
+      value.hour,
+      value.minute,
+    );
+    return rounded.add(Duration(minutes: minutesToAdd));
   }
 
   void _drawLabel(
@@ -1705,20 +1775,6 @@ class _InstantPhasesChartPainter extends CustomPainter {
     )..layout(maxWidth: width ?? double.infinity);
 
     painter.paint(canvas, Offset(center.dx - painter.width / 2, center.dy));
-  }
-
-  int _roundUpToNiceValue(int value) {
-    if (value <= 500) {
-      return 500;
-    }
-    final magnitude = math.pow(10, value.toString().length - 1).toInt();
-    final normalized = value / magnitude;
-    final niceNormalized = normalized <= 2
-        ? 2
-        : normalized <= 5
-        ? 5
-        : 10;
-    return niceNormalized * magnitude;
   }
 
   String _formatVa(double value) {
@@ -2919,16 +2975,18 @@ class _HourlyChartPainter extends CustomPainter {
     final chartHeight = size.height - labelHeight;
     final chartWidth = size.width - yAxisWidth;
     final maxValue = values.map((e) => e.consumptionWh).reduce(math.max);
-    final scaleMax = math.max(100, _roundUpToNiceValue(maxValue));
+    final scaleMax = math.max(100.0, maxValue.toDouble());
     final paint = Paint();
     final gridPaint = Paint()
       ..color = gridColor
       ..strokeWidth = 1;
 
-    for (var index = 0; index < 3; index++) {
-      final y = chartHeight * index / 2;
+    const gridLineCount = 5;
+    for (var index = 0; index < gridLineCount; index++) {
+      final ratio = index / (gridLineCount - 1);
+      final y = chartHeight * ratio;
       canvas.drawLine(Offset(yAxisWidth, y), Offset(size.width, y), gridPaint);
-      final value = scaleMax * (2 - index) / 2;
+      final value = scaleMax * (1 - ratio);
       _drawLabel(
         canvas,
         _formatChartKwh(value),
@@ -2953,7 +3011,7 @@ class _HourlyChartPainter extends CustomPainter {
       );
       canvas.drawRRect(rect, paint);
 
-      if (entry.hour.hour % 6 == 0) {
+      if (entry.hour.hour % 3 == 0) {
         _drawLabel(
           canvas,
           '${entry.hour.hour}h',
@@ -2980,21 +3038,6 @@ class _HourlyChartPainter extends CustomPainter {
     )..layout(maxWidth: width ?? double.infinity);
 
     painter.paint(canvas, Offset(center.dx - painter.width / 2, center.dy));
-  }
-
-  int _roundUpToNiceValue(int value) {
-    if (value <= 100) {
-      return 100;
-    }
-
-    final magnitude = math.pow(10, value.toString().length - 1).toInt();
-    final normalized = value / magnitude;
-    final niceNormalized = normalized <= 2
-        ? 2
-        : normalized <= 5
-        ? 5
-        : 10;
-    return niceNormalized * magnitude;
   }
 
   String _formatChartKwh(double value) {
