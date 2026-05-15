@@ -953,34 +953,90 @@ class EnergyDashboardPage extends StatefulWidget {
 }
 
 class _EnergyDashboardPageState extends State<EnergyDashboardPage> {
-  late Future<LinkySnapshot> _snapshotFuture;
+  LinkySnapshot? _snapshot;
+  Object? _error;
   LinkyLoadState _loadState = const LinkyLoadState.connecting();
+  var _loadingInitial = true;
+  var _refreshing = false;
 
   @override
   void initState() {
     super.initState();
-    _snapshotFuture = _loadTodayFromCache();
+    _loadTodayOnStartup();
   }
 
-  void _refresh() {
-    setState(() {
-      _snapshotFuture = _refreshTodayFromNetwork();
-    });
-  }
-
-  Future<LinkySnapshot> _loadTodayFromCache() async {
+  Future<void> _loadTodayOnStartup() async {
     _updateLoadState(const LinkyLoadState.loadingPeriod('du cache local'));
-    return widget.repository.fetchCachedCurrentSnapshot();
+    try {
+      final snapshot = await widget.repository.fetchCachedCurrentSnapshot();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _snapshot = snapshot;
+        _error = null;
+        _loadingInitial = false;
+      });
+      await _refresh(showInitialLoading: false);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error;
+      });
+      await _refresh(showInitialLoading: true);
+    }
   }
 
-  Future<LinkySnapshot> _refreshTodayFromNetwork() async {
-    _updateLoadState(const LinkyLoadState.connecting());
-    if (widget.repository is ApiLinkyRepository) {
-      await (widget.repository as ApiLinkyRepository).checkHealth();
+  Future<void> _refresh({bool showInitialLoading = false}) async {
+    if (!mounted || _refreshing) {
+      return;
     }
 
-    _updateLoadState(const LinkyLoadState.loadingPeriod('des données du jour'));
-    return widget.repository.fetchCurrentSnapshot();
+    if (showInitialLoading || _snapshot == null) {
+      setState(() {
+        _loadingInitial = true;
+        _error = null;
+      });
+    } else {
+      setState(() {
+        _refreshing = true;
+      });
+    }
+
+    _updateLoadState(const LinkyLoadState.connecting());
+    try {
+      if (widget.repository is ApiLinkyRepository) {
+        await (widget.repository as ApiLinkyRepository).checkHealth();
+      }
+
+      _updateLoadState(
+        const LinkyLoadState.loadingPeriod('des données du jour'),
+      );
+      final snapshot = await widget.repository.fetchCurrentSnapshot();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _snapshot = snapshot;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error;
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingInitial = false;
+          _refreshing = false;
+        });
+      }
+    }
   }
 
   void _updateLoadState(LinkyLoadState state) {
@@ -999,29 +1055,32 @@ class _EnergyDashboardPageState extends State<EnergyDashboardPage> {
 
   @override
   Widget build(BuildContext context) {
+    final snapshot = _snapshot;
+
     return Scaffold(
       body: SafeArea(
-        child: FutureBuilder<LinkySnapshot>(
-          future: _snapshotFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
+        child: Builder(
+          builder: (context) {
+            if (_loadingInitial && snapshot == null) {
               return _LoadingView(message: _loadState.message);
             }
 
-            if (snapshot.hasError || !snapshot.hasData) {
+            if (snapshot == null) {
               return _ErrorView(
                 apiBaseUrl: widget.apiBaseUrl,
-                error: snapshot.error,
-                onRetry: _refresh,
+                error: _error,
+                onRetry: () => _refresh(showInitialLoading: true),
                 onChangeApiBaseUrl: _changeApiBaseUrl,
               );
             }
 
             return _DashboardContent(
-              snapshot: snapshot.data!,
+              snapshot: snapshot,
               apiBaseUrl: widget.apiBaseUrl,
-              onRefresh: _refresh,
+              onRefresh: () => _refresh(showInitialLoading: false),
               onChangeApiBaseUrl: _changeApiBaseUrl,
+              isRefreshing: _refreshing,
+              refreshError: _error,
             );
           },
         ),
@@ -1036,12 +1095,16 @@ class _DashboardContent extends StatelessWidget {
     required this.apiBaseUrl,
     required this.onRefresh,
     required this.onChangeApiBaseUrl,
+    required this.isRefreshing,
+    required this.refreshError,
   });
 
   final LinkySnapshot snapshot;
   final String apiBaseUrl;
-  final VoidCallback onRefresh;
+  final Future<void> Function() onRefresh;
   final ValueChanged<String> onChangeApiBaseUrl;
+  final bool isRefreshing;
+  final Object? refreshError;
 
   @override
   Widget build(BuildContext context) {
@@ -1050,7 +1113,7 @@ class _DashboardContent extends StatelessWidget {
     final compact = width < 720;
 
     return RefreshIndicator(
-      onRefresh: () async => onRefresh(),
+      onRefresh: onRefresh,
       child: ListView(
         padding: EdgeInsets.symmetric(
           horizontal: compact ? 16 : 28,
@@ -1062,8 +1125,17 @@ class _DashboardContent extends StatelessWidget {
             apiBaseUrl: apiBaseUrl,
             onRefresh: onRefresh,
             onChangeApiBaseUrl: onChangeApiBaseUrl,
+            isRefreshing: isRefreshing,
           ),
           const SizedBox(height: 18),
+          if (refreshError != null) ...[
+            _InlineStatusMessage(
+              icon: Icons.cloud_off,
+              message:
+                  'Dernière actualisation impossible, affichage du cache conservé.',
+            ),
+            const SizedBox(height: 12),
+          ],
           _TodaySummaryHero(snapshot: snapshot),
           const SizedBox(height: 14),
           _PeakOffPeakCard(snapshot: snapshot),
@@ -1381,6 +1453,11 @@ class _InstantContent extends StatelessWidget {
               averageVa: _averageVa(snapshot.points, (point) => point.phase3Va),
               trend: _phaseTrend(snapshot.points, (point) => point.phase3Va),
             ),
+            _PhaseStat(
+              label: 'Total',
+              averageVa: _averageVa(snapshot.points, (point) => point.totalVa),
+              trend: _phaseTrend(snapshot.points, (point) => point.totalVa),
+            ),
           ],
         ),
         const SizedBox(height: 18),
@@ -1480,8 +1557,9 @@ class _InstantPhasesChartPainter extends CustomPainter {
       return;
     }
 
-    const labelHeight = 24.0;
-    const yAxisWidth = 42.0;
+    const labelHeight = 48.0;
+    const yAxisWidth = 56.0;
+    const yAxisLabelWidth = yAxisWidth - 12;
     final chartHeight = size.height - labelHeight;
     final chartWidth = size.width - yAxisWidth;
     final maxValue = points
@@ -1497,16 +1575,18 @@ class _InstantPhasesChartPainter extends CustomPainter {
       ..color = gridColor
       ..strokeWidth = 1;
 
-    for (var index = 0; index < 3; index++) {
-      final y = chartHeight * index / 2;
+    const gridLineCount = 5;
+    for (var index = 0; index < gridLineCount; index++) {
+      final ratio = index / (gridLineCount - 1);
+      final y = chartHeight * ratio;
       canvas.drawLine(Offset(yAxisWidth, y), Offset(size.width, y), gridPaint);
-      final value = scaleMax * (2 - index) / 2;
+      final value = scaleMax * (1 - ratio);
       _drawLabel(
         canvas,
         _formatVa(value),
-        Offset(yAxisWidth - 6, y - 6),
+        Offset(yAxisLabelWidth / 2, y - 6),
         align: TextAlign.right,
-        width: yAxisWidth - 8,
+        width: yAxisLabelWidth,
       );
     }
 
@@ -1538,7 +1618,8 @@ class _InstantPhasesChartPainter extends CustomPainter {
       scaleMax,
     );
 
-    _drawLegend(canvas, size, chartHeight + 8);
+    _drawTimeLabels(canvas, chartHeight + 8, chartWidth, yAxisWidth);
+    _drawLegend(canvas, size, chartHeight + 30);
   }
 
   void _drawLine(
@@ -1584,6 +1665,26 @@ class _InstantPhasesChartPainter extends CustomPainter {
       canvas.drawCircle(Offset(x, y + 7), 4, paint);
       _drawLabel(canvas, item.$1, Offset(x + 20, y), width: 24);
       x += 52;
+    }
+  }
+
+  void _drawTimeLabels(
+    Canvas canvas,
+    double y,
+    double chartWidth,
+    double yAxisWidth,
+  ) {
+    final first = points.first.timestamp;
+    final middle = points[points.length ~/ 2].timestamp;
+    final last = points.last.timestamp;
+    final labels = [
+      (_formatTime(first), yAxisWidth + 20),
+      (_formatTime(middle), yAxisWidth + chartWidth / 2),
+      (_formatTime(last), yAxisWidth + chartWidth - 20),
+    ];
+
+    for (final label in labels) {
+      _drawLabel(canvas, label.$1, Offset(label.$2, y), width: 44);
     }
   }
 
@@ -1698,7 +1799,7 @@ class _PhaseStat extends StatelessWidget {
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      '$trendLabel - moyenne',
+                      trendLabel,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: trendColor,
                         fontWeight: FontWeight.w700,
@@ -2137,12 +2238,14 @@ class _Header extends StatelessWidget {
     required this.apiBaseUrl,
     required this.onRefresh,
     required this.onChangeApiBaseUrl,
+    required this.isRefreshing,
   });
 
   final LinkySnapshot snapshot;
   final String apiBaseUrl;
   final VoidCallback onRefresh;
   final ValueChanged<String> onChangeApiBaseUrl;
+  final bool isRefreshing;
 
   @override
   Widget build(BuildContext context) {
@@ -2171,10 +2274,23 @@ class _Header extends StatelessWidget {
             ],
           ),
         ),
-        IconButton.filledTonal(
-          onPressed: onRefresh,
-          tooltip: 'Actualiser',
-          icon: const Icon(Icons.refresh),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (isRefreshing) ...[
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2.2),
+              ),
+              const SizedBox(width: 10),
+            ],
+            IconButton.filledTonal(
+              onPressed: isRefreshing ? null : onRefresh,
+              tooltip: 'Actualiser',
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
         ),
         const SizedBox(width: 8),
         IconButton.filledTonal(
@@ -2798,7 +2914,8 @@ class _HourlyChartPainter extends CustomPainter {
     }
 
     const labelHeight = 24.0;
-    const yAxisWidth = 42.0;
+    const yAxisWidth = 56.0;
+    const yAxisLabelWidth = yAxisWidth - 12;
     final chartHeight = size.height - labelHeight;
     final chartWidth = size.width - yAxisWidth;
     final maxValue = values.map((e) => e.consumptionWh).reduce(math.max);
@@ -2815,9 +2932,9 @@ class _HourlyChartPainter extends CustomPainter {
       _drawLabel(
         canvas,
         _formatChartKwh(value),
-        Offset(yAxisWidth - 6, y - 6),
+        Offset(yAxisLabelWidth / 2, y - 6),
         align: TextAlign.right,
-        width: yAxisWidth - 8,
+        width: yAxisLabelWidth,
       );
     }
 
