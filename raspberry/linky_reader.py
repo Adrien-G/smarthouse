@@ -42,6 +42,10 @@ CSV_FIELDS = [
     "sinsts1_va",
     "sinsts2_va",
     "sinsts3_va",
+    "njourf",
+    "njourf_next",
+    "pjourf_next",
+    "demain",
     "stge",
 ]
 
@@ -209,6 +213,18 @@ def parse_linky_field(key: str, value: str) -> dict[str, Any]:
 
     if key == "STGE":
         return {"stge": value.strip()}
+
+    if key == "NJOURF":
+        return {"njourf": value.strip()}
+
+    if key == "NJOURF+1":
+        return {"njourf_next": value.strip()}
+
+    if key == "PJOURF+1":
+        return {"pjourf_next": value.strip()}
+
+    if key == "DEMAIN":
+        return {"demain": value.strip()}
 
     return {}
 

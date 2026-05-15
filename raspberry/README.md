@@ -27,6 +27,13 @@ Chaque ligne est maintenant un CSV separe par `;` avec un en-tete :
 timestamp;tariff_code;tariff_label;easf01_wh;...;sinsts3_va;stge
 ```
 
+Les champs Tempo du lendemain transmis par le compteur sont aussi conserves si
+la trame les fournit :
+
+```text
+njourf;njourf_next;pjourf_next;demain
+```
+
 Si un fichier du jour existe deja avec l'ancien format prototype, le lecteur le
 renomme automatiquement en `.legacy` et recree un fichier propre avec l'en-tete
 CSV. Cela evite que l'API lise un melange d'anciens et de nouveaux formats.

@@ -5,8 +5,6 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Optional, Union
-from urllib.error import URLError
-from urllib.request import urlopen
 from urllib.parse import parse_qs, urlparse
 
 
@@ -14,9 +12,6 @@ BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "config.json"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8080
-TEMPO_CACHE_PATH = BASE_DIR / "tempo_cache.json"
-TEMPO_TODAY_URL = "https://www.api-couleur-tempo.fr/api/jourTempo/today"
-TEMPO_TOMORROW_URL = "https://www.api-couleur-tempo.fr/api/jourTempo/tomorrow"
 
 
 def main() -> None:
@@ -70,7 +65,7 @@ class LinkyApiHandler(BaseHTTPRequestHandler):
             return
 
         if route.path == "/api/tempo":
-            self.send_json({"data": read_tempo_colors()})
+            self.send_json({"data": read_local_tempo_colors()})
             return
 
         self.send_json({"error": "Route introuvable"}, HTTPStatus.NOT_FOUND)
@@ -302,58 +297,36 @@ def instantaneous_fields() -> list[str]:
         "sinsts2_va",
         "sinsts3_va",
         "stge",
+        "njourf",
+        "njourf_next",
+        "pjourf_next",
+        "demain",
     ]
 
 
-def read_tempo_colors() -> dict[str, Any]:
-    cached = read_tempo_cache()
-    cache_date = cached.get("date") if cached else None
-    today = datetime.now().strftime("%Y-%m-%d")
-    if cached and cache_date == today:
-        return cached
+def text_fields() -> set[str]:
+    return {
+        "timestamp",
+        "tariff_label",
+        "stge",
+        "njourf",
+        "njourf_next",
+        "pjourf_next",
+        "demain",
+    }
 
-    data = {
-        "date": today,
-        "today": fetch_tempo_color(TEMPO_TODAY_URL),
-        "tomorrow": fetch_tempo_color(TEMPO_TOMORROW_URL),
-        "source": "api-couleur-tempo.fr",
+
+def read_local_tempo_colors() -> dict[str, Any]:
+    current = read_current_measurement() or {}
+    return {
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "today": normalize_tempo_color(current.get("tariff_label")),
+        "tomorrow": normalize_tempo_color(
+            current.get("demain") or current.get("pjourf_next")
+        ),
+        "source": "linky",
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
-    save_tempo_cache(data)
-    return data
-
-
-def read_tempo_cache() -> Optional[dict[str, Any]]:
-    if not TEMPO_CACHE_PATH.exists():
-        return None
-
-    try:
-        with TEMPO_CACHE_PATH.open("r", encoding="utf-8") as file:
-            decoded = json.load(file)
-            return decoded if isinstance(decoded, dict) else None
-    except (OSError, json.JSONDecodeError):
-        return None
-
-
-def save_tempo_cache(data: dict[str, Any]) -> None:
-    with TEMPO_CACHE_PATH.open("w", encoding="utf-8") as file:
-        json.dump(data, file, ensure_ascii=False, indent=2)
-        file.write("\n")
-
-
-def fetch_tempo_color(url: str) -> str:
-    try:
-        with urlopen(url, timeout=5) as response:
-            raw = response.read().decode("utf-8").strip()
-    except (OSError, URLError):
-        return "unknown"
-
-    try:
-        decoded = json.loads(raw)
-    except json.JSONDecodeError:
-        decoded = raw
-
-    return normalize_tempo_color(decoded)
 
 
 def normalize_tempo_color(value: Any) -> str:
@@ -368,6 +341,12 @@ def normalize_tempo_color(value: Any) -> str:
     if normalized in {"2", "blanc", "white"}:
         return "white"
     if normalized in {"3", "rouge", "red"}:
+        return "red"
+    if "bleu" in normalized or "blue" in normalized or "hcjb" in normalized or "hpjb" in normalized:
+        return "blue"
+    if "blanc" in normalized or "white" in normalized or "hcjw" in normalized or "hpjw" in normalized:
+        return "white"
+    if "rouge" in normalized or "red" in normalized or "hcjr" in normalized or "hpjr" in normalized:
         return "red"
     return "unknown"
 
@@ -388,7 +367,7 @@ def normalize_row(row: dict[str, str]) -> dict[str, Any]:
             continue
         if value is None:
             normalized[key] = None
-        elif key == "timestamp" or key == "tariff_label" or key == "stge":
+        elif key in text_fields():
             normalized[key] = value
         else:
             normalized[key] = parse_number(value)

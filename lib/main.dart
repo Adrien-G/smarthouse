@@ -9,7 +9,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final settings = await AppSettings.load();
-  runApp(SmartHouseApp(settings: settings));
+  final hourlyHistoryCache = await HourlyHistoryCache.load();
+  runApp(
+    SmartHouseApp(settings: settings, hourlyHistoryCache: hourlyHistoryCache),
+  );
 }
 
 class AppSettings {
@@ -38,12 +41,14 @@ class SmartHouseApp extends StatelessWidget {
   const SmartHouseApp({
     super.key,
     this.repository,
+    this.hourlyHistoryCache,
     this.settings = const AppSettings(
       apiBaseUrl: ApiLinkyRepository.defaultBaseUrl,
     ),
   });
 
   final LinkyRepository? repository;
+  final HourlyHistoryCache? hourlyHistoryCache;
   final AppSettings settings;
 
   @override
@@ -64,6 +69,7 @@ class SmartHouseApp extends StatelessWidget {
       home: SmartHouseHome(
         initialApiBaseUrl: settings.apiBaseUrl,
         repository: repository,
+        hourlyHistoryCache: hourlyHistoryCache,
       ),
     );
   }
@@ -199,7 +205,9 @@ class HourlyConsumption {
 
 abstract class LinkyRepository {
   Future<LinkySnapshot> fetchCurrentSnapshot();
+  Future<LinkySnapshot> fetchCachedCurrentSnapshot();
   Future<LinkySnapshot> fetchDailySnapshot(DateTime date);
+  Future<LinkySnapshot> fetchCachedDailySnapshot(DateTime date);
   Future<InstantConsumptionSnapshot> fetchInstantConsumption();
 }
 
@@ -217,6 +225,102 @@ class PhaseInstantPoint {
   final int phase3Va;
 
   int get totalVa => phase1Va + phase2Va + phase3Va;
+}
+
+class CachedHourlyHistory {
+  const CachedHourlyHistory({required this.rows});
+
+  final List<Map<String, dynamic>> rows;
+
+  bool get isEmpty => rows.isEmpty;
+  bool get isCompleteDay => rows.length >= 24;
+}
+
+class HourlyHistoryCache {
+  const HourlyHistoryCache(this.preferences);
+
+  final SharedPreferences preferences;
+
+  static Future<HourlyHistoryCache> load() async {
+    return HourlyHistoryCache(await SharedPreferences.getInstance());
+  }
+
+  CachedHourlyHistory? read(DateTime date) {
+    final encoded = preferences.getString(_key(date));
+    if (encoded == null) {
+      return null;
+    }
+
+    try {
+      final decoded = jsonDecode(encoded);
+      if (decoded is! List) {
+        return null;
+      }
+      return CachedHourlyHistory(
+        rows: decoded.whereType<Map>().map((row) {
+          return row.map((key, value) => MapEntry(key.toString(), value));
+        }).toList(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> write(DateTime date, List<Map<String, dynamic>> rows) async {
+    await preferences.setString(_key(date), jsonEncode(rows));
+  }
+
+  Future<List<Map<String, dynamic>>> mergeToday(
+    DateTime date,
+    List<Map<String, dynamic>> freshRows,
+  ) async {
+    final cachedRows = read(date)?.rows ?? const [];
+    final now = DateTime.now();
+    final currentHour = DateTime(now.year, now.month, now.day, now.hour);
+    final merged = <String, Map<String, dynamic>>{};
+
+    for (final row in cachedRows) {
+      final timestamp = DateTime.tryParse(row['timestamp']?.toString() ?? '');
+      if (timestamp == null) {
+        continue;
+      }
+      final hour = DateTime(
+        timestamp.year,
+        timestamp.month,
+        timestamp.day,
+        timestamp.hour,
+      );
+      if (hour.isBefore(currentHour)) {
+        merged[hour.toIso8601String()] = row;
+      }
+    }
+
+    for (final row in freshRows) {
+      final timestamp = DateTime.tryParse(row['timestamp']?.toString() ?? '');
+      if (timestamp == null) {
+        continue;
+      }
+      final hour = DateTime(
+        timestamp.year,
+        timestamp.month,
+        timestamp.day,
+        timestamp.hour,
+      );
+      merged[hour.toIso8601String()] = row;
+    }
+
+    final rows = merged.keys.toList()..sort();
+    final result = [for (final key in rows) merged[key]!];
+    await write(date, result);
+    return result;
+  }
+
+  String _key(DateTime date) {
+    final year = date.year.toString().padLeft(4, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return 'history_hour_$year-$month-$day';
+  }
 }
 
 class InstantConsumptionSnapshot {
@@ -242,6 +346,7 @@ class ApiLinkyRepository implements LinkyRepository {
     this.timeout = const Duration(seconds: 8),
     this.subscribedPowerKva = 15,
     this.energyPrices = TempoEnergyPrices.esStrasbourg20250801,
+    this.hourlyHistoryCache,
   });
 
   static const defaultBaseUrl = 'http://raspberrypi.local:8080';
@@ -250,32 +355,71 @@ class ApiLinkyRepository implements LinkyRepository {
   final Duration timeout;
   final int subscribedPowerKva;
   final TempoEnergyPrices energyPrices;
+  final HourlyHistoryCache? hourlyHistoryCache;
 
   @override
   Future<LinkySnapshot> fetchCurrentSnapshot() async {
     final current =
         await _getData('/api/linky/current') as Map<String, dynamic>;
-    final history = await _getHistoryOrEmpty();
+    final history = await _getTodayHourlyHistoryOrEmpty();
     final rows = history.whereType<Map<String, dynamic>>().toList();
-    final tempo = await _getTempoOrNull();
     return _snapshotFromRows(
       current: current,
       rows: rows,
       timestampFallback: DateTime.now(),
-      tempoTomorrow: tempo == null
-          ? TempoDayColor.unknown
-          : _tempoColor(tempo['tomorrow']),
+      tempoTomorrow: _tomorrowTempoColor(current),
+    );
+  }
+
+  static TempoDayColor _tomorrowTempoColor(Map<String, dynamic> current) {
+    final fromLinky = _tempoColor(current['demain']);
+    if (fromLinky != TempoDayColor.unknown) {
+      return fromLinky;
+    }
+
+    final fromProviderProfile = _tempoColor(current['pjourf_next']);
+    if (fromProviderProfile != TempoDayColor.unknown) {
+      return fromProviderProfile;
+    }
+
+    return TempoDayColor.unknown;
+  }
+
+  @override
+  Future<LinkySnapshot> fetchCachedCurrentSnapshot() async {
+    final rows = hourlyHistoryCache?.read(DateTime.now())?.rows ?? const [];
+    if (rows.isEmpty) {
+      throw const LinkyApiException('Aucune donnée du jour en cache');
+    }
+    return _snapshotFromRows(
+      current: rows.last,
+      rows: rows,
+      timestampFallback: DateTime.now(),
+      tempoTomorrow: TempoDayColor.unknown,
     );
   }
 
   @override
   Future<LinkySnapshot> fetchDailySnapshot(DateTime date) async {
-    final path =
-        '/api/linky/history?date=${_formatApiDate(date)}&resolution=hour';
-    final history = await _getData(path) as List<dynamic>;
-    final rows = history.whereType<Map<String, dynamic>>().toList();
+    final rows = await _getHourlyRowsForDate(date, forceRefresh: true);
     if (rows.isEmpty) {
       throw const LinkyApiException('Aucune donnée pour cette journée');
+    }
+    return _snapshotFromRows(
+      current: rows.last,
+      rows: rows,
+      timestampFallback: date,
+      tempoTomorrow: TempoDayColor.unknown,
+    );
+  }
+
+  @override
+  Future<LinkySnapshot> fetchCachedDailySnapshot(DateTime date) async {
+    final rows = hourlyHistoryCache?.read(date)?.rows ?? const [];
+    if (rows.isEmpty) {
+      throw const LinkyApiException(
+        'Aucune donnée en cache pour cette journée',
+      );
     }
     return _snapshotFromRows(
       current: rows.last,
@@ -345,15 +489,6 @@ class ApiLinkyRepository implements LinkyRepository {
     );
   }
 
-  Future<Map<String, dynamic>?> _getTempoOrNull() async {
-    try {
-      final tempo = await _getData('/api/tempo');
-      return tempo is Map<String, dynamic> ? tempo : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
   String _formatApiDate(DateTime date) {
     final year = date.year.toString().padLeft(4, '0');
     final month = date.month.toString().padLeft(2, '0');
@@ -361,13 +496,49 @@ class ApiLinkyRepository implements LinkyRepository {
     return '$year-$month-$day';
   }
 
-  Future<List<dynamic>> _getHistoryOrEmpty() async {
+  Future<List<dynamic>> _getTodayHourlyHistoryOrEmpty() async {
     try {
-      return await _getData('/api/linky/history?resolution=hour')
-          as List<dynamic>;
+      return await _getHourlyRowsForDate(DateTime.now(), forceRefresh: true);
     } catch (_) {
       return const [];
     }
+  }
+
+  Future<List<Map<String, dynamic>>> _getHourlyRowsForDate(
+    DateTime date, {
+    required bool forceRefresh,
+  }) async {
+    final cache = hourlyHistoryCache;
+    final isToday = _isSameDay(date, DateTime.now());
+
+    if (cache != null && !forceRefresh) {
+      final cached = cache.read(date);
+      if (cached != null && !cached.isEmpty) {
+        return cached.rows;
+      }
+    }
+
+    final path =
+        '/api/linky/history?date=${_formatApiDate(date)}&resolution=hour';
+    final history = await _getData(path) as List<dynamic>;
+    final rows = history.whereType<Map<String, dynamic>>().toList();
+
+    if (cache == null) {
+      return rows;
+    }
+
+    if (isToday) {
+      return cache.mergeToday(date, rows);
+    }
+
+    await cache.write(date, rows);
+    return rows;
+  }
+
+  bool _isSameDay(DateTime left, DateTime right) {
+    return left.year == right.year &&
+        left.month == right.month &&
+        left.day == right.day;
   }
 
   Future<void> checkHealth() async {
@@ -525,6 +696,15 @@ class ApiLinkyRepository implements LinkyRepository {
     if (value.contains('ROUGE') || value.contains('RED')) {
       return TempoDayColor.red;
     }
+    if (value.contains('HCJB') || value.contains('HPJB')) {
+      return TempoDayColor.blue;
+    }
+    if (value.contains('HCJW') || value.contains('HPJW')) {
+      return TempoDayColor.white;
+    }
+    if (value.contains('HCJR') || value.contains('HPJR')) {
+      return TempoDayColor.red;
+    }
     return TempoDayColor.unknown;
   }
 
@@ -630,6 +810,16 @@ class MockLinkyRepository implements LinkyRepository {
   }
 
   @override
+  Future<LinkySnapshot> fetchCachedCurrentSnapshot() async {
+    return fetchCurrentSnapshot();
+  }
+
+  @override
+  Future<LinkySnapshot> fetchCachedDailySnapshot(DateTime date) async {
+    return fetchDailySnapshot(date);
+  }
+
+  @override
   Future<InstantConsumptionSnapshot> fetchInstantConsumption() async {
     final now = DateTime.now();
     return InstantConsumptionSnapshot(
@@ -652,10 +842,12 @@ class SmartHouseHome extends StatefulWidget {
     super.key,
     required this.initialApiBaseUrl,
     this.repository,
+    this.hourlyHistoryCache,
   });
 
   final String initialApiBaseUrl;
   final LinkyRepository? repository;
+  final HourlyHistoryCache? hourlyHistoryCache;
 
   @override
   State<SmartHouseHome> createState() => _SmartHouseHomeState();
@@ -670,7 +862,12 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
   void initState() {
     super.initState();
     _apiBaseUrl = widget.initialApiBaseUrl;
-    _repository = widget.repository ?? ApiLinkyRepository(baseUrl: _apiBaseUrl);
+    _repository =
+        widget.repository ??
+        ApiLinkyRepository(
+          baseUrl: _apiBaseUrl,
+          hourlyHistoryCache: widget.hourlyHistoryCache,
+        );
   }
 
   Future<void> _changeApiBaseUrl(String value) async {
@@ -680,7 +877,11 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
     setState(() {
       _apiBaseUrl = normalized;
       _repository =
-          widget.repository ?? ApiLinkyRepository(baseUrl: normalized);
+          widget.repository ??
+          ApiLinkyRepository(
+            baseUrl: normalized,
+            hourlyHistoryCache: widget.hourlyHistoryCache,
+          );
     });
   }
 
@@ -758,16 +959,21 @@ class _EnergyDashboardPageState extends State<EnergyDashboardPage> {
   @override
   void initState() {
     super.initState();
-    _snapshotFuture = _loadToday();
+    _snapshotFuture = _loadTodayFromCache();
   }
 
   void _refresh() {
     setState(() {
-      _snapshotFuture = _loadToday();
+      _snapshotFuture = _refreshTodayFromNetwork();
     });
   }
 
-  Future<LinkySnapshot> _loadToday() async {
+  Future<LinkySnapshot> _loadTodayFromCache() async {
+    _updateLoadState(const LinkyLoadState.loadingPeriod('du cache local'));
+    return widget.repository.fetchCachedCurrentSnapshot();
+  }
+
+  Future<LinkySnapshot> _refreshTodayFromNetwork() async {
     _updateLoadState(const LinkyLoadState.connecting());
     if (widget.repository is ApiLinkyRepository) {
       await (widget.repository as ApiLinkyRepository).checkHealth();
@@ -1358,16 +1564,21 @@ class _HistoryPageState extends State<HistoryPage> {
   void initState() {
     super.initState();
     _repository = widget.repository;
-    _snapshotFuture = _loadSelectedDate();
+    _snapshotFuture = _loadSelectedDateFromCache();
   }
 
   void _reload() {
     setState(() {
-      _snapshotFuture = _loadSelectedDate();
+      _snapshotFuture = _refreshSelectedDateFromNetwork();
     });
   }
 
-  Future<LinkySnapshot> _loadSelectedDate() async {
+  Future<LinkySnapshot> _loadSelectedDateFromCache() async {
+    _updateLoadState(const LinkyLoadState.loadingPeriod('du cache local'));
+    return _repository.fetchCachedDailySnapshot(_selectedDate);
+  }
+
+  Future<LinkySnapshot> _refreshSelectedDateFromNetwork() async {
     _updateLoadState(const LinkyLoadState.connecting());
     if (_repository is ApiLinkyRepository) {
       await (_repository as ApiLinkyRepository).checkHealth();
@@ -1400,7 +1611,7 @@ class _HistoryPageState extends State<HistoryPage> {
 
     setState(() {
       _selectedDate = picked;
-      _snapshotFuture = _loadSelectedDate();
+      _snapshotFuture = _loadSelectedDateFromCache();
     });
   }
 
@@ -2679,7 +2890,7 @@ class _ErrorView extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Impossible de lire les données Linky locales. Vérifie que le Raspberry est allumé, que l’API tourne et que le téléphone est sur le même Wi-Fi.',
+              'Aucune donnée locale disponible. Appuie sur Réessayer pour interroger le Raspberry.',
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 10),
