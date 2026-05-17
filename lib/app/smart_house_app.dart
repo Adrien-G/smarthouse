@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/api_linky_repository.dart';
 import '../data/hourly_history_cache.dart';
+import '../features/devices/device_detection_page.dart';
 import '../features/history/history_page.dart';
 import '../features/instant/instant_page.dart';
 import '../features/today/today_page.dart';
@@ -121,6 +122,10 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
         key: ValueKey('instant-page-$_apiBaseUrl'),
         repository: _repository,
       ),
+      2 => DeviceDetectionPage(
+        key: ValueKey('devices-page-$_apiBaseUrl'),
+        repository: _repository,
+      ),
       _ => HistoryPage(
         key: ValueKey('history-page-$_apiBaseUrl'),
         apiBaseUrl: _apiBaseUrl,
@@ -147,6 +152,11 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
             icon: Icon(Icons.show_chart),
             selectedIcon: Icon(Icons.show_chart),
             label: 'Instantané',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.electrical_services_outlined),
+            selectedIcon: Icon(Icons.electrical_services),
+            label: 'Appareils',
           ),
           NavigationDestination(
             icon: Icon(Icons.bar_chart_outlined),
