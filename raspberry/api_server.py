@@ -221,7 +221,7 @@ def aggregate_measurements(
 ) -> list[dict[str, Any]]:
     buckets: dict[str, dict[str, Any]] = {}
 
-    for row in rows:
+    for index, row in enumerate(rows):
         timestamp = parse_measurement_timestamp(row.get("timestamp"))
         if timestamp is None:
             continue
@@ -234,6 +234,7 @@ def aggregate_measurements(
                 "timestamp": key,
                 "tariff_label": row.get("tariff_label", ""),
                 "sample_count": 0,
+                "consumption_wh": 0,
             }
             for field in energy_fields():
                 aggregate[field] = 0
@@ -244,6 +245,13 @@ def aggregate_measurements(
         aggregate["sample_count"] += 1
         aggregate["tariff_label"] = row.get("tariff_label", aggregate["tariff_label"])
 
+        if index > 0:
+            previous_row = rows[index - 1]
+            aggregate["consumption_wh"] += positive_delta(
+                total_energy_index(previous_row),
+                total_energy_index(row),
+            )
+
         for field in energy_fields():
             aggregate[field] = max_number(aggregate.get(field), row.get(field))
 
@@ -251,6 +259,27 @@ def aggregate_measurements(
             aggregate[field] = row.get(field)
 
     return [buckets[key] for key in sorted(buckets.keys())]
+
+
+def total_energy_index(row: dict[str, Any]) -> int:
+    return sum(parse_int(row.get(field)) for field in energy_fields())
+
+
+def parse_int(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return round(value)
+    try:
+        return int(str(value))
+    except ValueError:
+        return 0
+
+
+def positive_delta(previous: int, current: int) -> int:
+    return max(0, current - previous)
 
 
 def truncate_datetime(value: datetime, resolution: str) -> datetime:

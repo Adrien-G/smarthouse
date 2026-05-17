@@ -57,6 +57,7 @@ class MockLinkyRepository implements LinkyRepository {
             hour: start.add(Duration(hours: index)),
             consumptionWh: values[index],
             tempoColor: index < 6 ? TempoDayColor.red : TempoDayColor.blue,
+            isPeakHour: index >= 6 && index < 22,
           ),
       ],
     );

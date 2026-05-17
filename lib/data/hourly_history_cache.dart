@@ -38,6 +38,15 @@ class HourlyHistoryCache {
     await preferences.setString(_key(date), jsonEncode(rows));
   }
 
+  Future<void> clearAll() async {
+    final keys = preferences.getKeys().where(
+      (key) => key.startsWith('history_hour_'),
+    );
+    for (final key in keys) {
+      await preferences.remove(key);
+    }
+  }
+
   Future<List<Map<String, dynamic>>> mergeToday(
     DateTime date,
     List<Map<String, dynamic>> freshRows,

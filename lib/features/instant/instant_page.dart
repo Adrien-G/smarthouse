@@ -212,22 +212,22 @@ class _InstantContent extends StatelessWidget {
           children: [
             _PhaseStat(
               label: 'Phase 1',
-              averageVa: _averageVa(snapshot.points, (point) => point.phase1Va),
+              currentW: latest.phase1Va,
               trend: _phaseTrend(snapshot.points, (point) => point.phase1Va),
             ),
             _PhaseStat(
               label: 'Phase 2',
-              averageVa: _averageVa(snapshot.points, (point) => point.phase2Va),
+              currentW: latest.phase2Va,
               trend: _phaseTrend(snapshot.points, (point) => point.phase2Va),
             ),
             _PhaseStat(
               label: 'Phase 3',
-              averageVa: _averageVa(snapshot.points, (point) => point.phase3Va),
+              currentW: latest.phase3Va,
               trend: _phaseTrend(snapshot.points, (point) => point.phase3Va),
             ),
             _PhaseStat(
               label: 'Total',
-              averageVa: _averageVa(snapshot.points, (point) => point.totalVa),
+              currentW: latest.totalVa,
               trend: _phaseTrend(snapshot.points, (point) => point.totalVa),
             ),
           ],
@@ -686,12 +686,12 @@ class _InstantPhasesChartPainter extends CustomPainter {
 class _PhaseStat extends StatelessWidget {
   const _PhaseStat({
     required this.label,
-    required this.averageVa,
+    required this.currentW,
     required this.trend,
   });
 
   final String label;
-  final int averageVa;
+  final int currentW;
   final _PhaseTrend trend;
 
   @override
@@ -734,7 +734,7 @@ class _PhaseStat extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                '${(averageVa / 1000).toStringAsFixed(2)} kW',
+                _formatInstantPower(currentW),
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w900,
                 ),
@@ -760,5 +760,12 @@ class _PhaseStat extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _formatInstantPower(int watts) {
+    if (watts >= 1000) {
+      return '${(watts / 1000).toStringAsFixed(2)} kW';
+    }
+    return '$watts W';
   }
 }

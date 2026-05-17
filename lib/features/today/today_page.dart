@@ -12,11 +12,13 @@ class EnergyDashboardPage extends StatefulWidget {
     required this.apiBaseUrl,
     required this.repository,
     required this.onChangeApiBaseUrl,
+    required this.onClearCache,
   });
 
   final String apiBaseUrl;
   final LinkyRepository repository;
   final ValueChanged<String> onChangeApiBaseUrl;
+  final Future<void> Function() onClearCache;
 
   @override
   State<EnergyDashboardPage> createState() => _EnergyDashboardPageState();
@@ -123,6 +125,19 @@ class _EnergyDashboardPageState extends State<EnergyDashboardPage> {
     widget.onChangeApiBaseUrl(value);
   }
 
+  Future<void> _clearCache() async {
+    await widget.onClearCache();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _snapshot = null;
+      _error = null;
+      _loadingInitial = true;
+    });
+    await _refresh(showInitialLoading: true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final snapshot = _snapshot;
@@ -141,6 +156,7 @@ class _EnergyDashboardPageState extends State<EnergyDashboardPage> {
                 error: _error,
                 onRetry: () => _refresh(showInitialLoading: true),
                 onChangeApiBaseUrl: _changeApiBaseUrl,
+                onClearCache: _clearCache,
               );
             }
 
@@ -149,6 +165,7 @@ class _EnergyDashboardPageState extends State<EnergyDashboardPage> {
               apiBaseUrl: widget.apiBaseUrl,
               onRefresh: () => _refresh(showInitialLoading: false),
               onChangeApiBaseUrl: _changeApiBaseUrl,
+              onClearCache: _clearCache,
               isRefreshing: _refreshing,
               refreshError: _error,
             );
@@ -165,6 +182,7 @@ class _DashboardContent extends StatelessWidget {
     required this.apiBaseUrl,
     required this.onRefresh,
     required this.onChangeApiBaseUrl,
+    required this.onClearCache,
     required this.isRefreshing,
     required this.refreshError,
   });
@@ -173,6 +191,7 @@ class _DashboardContent extends StatelessWidget {
   final String apiBaseUrl;
   final Future<void> Function() onRefresh;
   final ValueChanged<String> onChangeApiBaseUrl;
+  final Future<void> Function() onClearCache;
   final bool isRefreshing;
   final Object? refreshError;
 
@@ -195,6 +214,7 @@ class _DashboardContent extends StatelessWidget {
             apiBaseUrl: apiBaseUrl,
             onRefresh: onRefresh,
             onChangeApiBaseUrl: onChangeApiBaseUrl,
+            onClearCache: onClearCache,
             isRefreshing: isRefreshing,
           ),
           const SizedBox(height: 18),
@@ -287,6 +307,7 @@ class _Header extends StatelessWidget {
     required this.apiBaseUrl,
     required this.onRefresh,
     required this.onChangeApiBaseUrl,
+    required this.onClearCache,
     required this.isRefreshing,
   });
 
@@ -294,6 +315,7 @@ class _Header extends StatelessWidget {
   final String apiBaseUrl;
   final VoidCallback onRefresh;
   final ValueChanged<String> onChangeApiBaseUrl;
+  final Future<void> Function() onClearCache;
   final bool isRefreshing;
 
   @override
@@ -347,6 +369,7 @@ class _Header extends StatelessWidget {
             context: context,
             currentValue: apiBaseUrl,
             onSubmitted: onChangeApiBaseUrl,
+            onClearCache: onClearCache,
           ),
           tooltip: 'Configurer',
           icon: const Icon(Icons.settings),
@@ -1040,7 +1063,7 @@ class _HourlyChartPainter extends CustomPainter {
       final normalized = entry.consumptionWh / scaleMax;
       final height = math.max(4.0, normalized * (chartHeight - 8));
       final left = yAxisWidth + index * (barWidth + gap);
-      paint.color = _barColor(entry.tempoColor);
+      paint.color = _barColor(entry.tempoColor, isPeakHour: entry.isPeakHour);
       final rect = RRect.fromRectAndRadius(
         Rect.fromLTWH(left, chartHeight - height, barWidth, height),
         const Radius.circular(4),
@@ -1178,13 +1201,14 @@ class _HourlyChartPainter extends CustomPainter {
     return '${value.round()} Wh';
   }
 
-  Color _barColor(TempoDayColor tempoColor) {
-    return switch (tempoColor) {
+  Color _barColor(TempoDayColor tempoColor, {required bool isPeakHour}) {
+    final baseColor = switch (tempoColor) {
       TempoDayColor.blue => const Color(0xff3279bd),
       TempoDayColor.white => const Color(0xff9ca3af),
       TempoDayColor.red => const Color(0xffc23b35),
       TempoDayColor.unknown => barColor,
     };
+    return isPeakHour ? baseColor : Color.lerp(baseColor, Colors.white, 0.22)!;
   }
 
   @override

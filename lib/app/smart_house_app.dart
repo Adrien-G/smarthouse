@@ -95,6 +95,18 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
     });
   }
 
+  Future<void> _clearCache() async {
+    await widget.hourlyHistoryCache?.clearAll();
+    setState(() {
+      _repository =
+          widget.repository ??
+          ApiLinkyRepository(
+            baseUrl: _apiBaseUrl,
+            hourlyHistoryCache: widget.hourlyHistoryCache,
+          );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final page = switch (_selectedIndex) {
@@ -103,6 +115,7 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
         apiBaseUrl: _apiBaseUrl,
         repository: _repository,
         onChangeApiBaseUrl: _changeApiBaseUrl,
+        onClearCache: _clearCache,
       ),
       1 => InstantConsumptionPage(
         key: ValueKey('instant-page-$_apiBaseUrl'),

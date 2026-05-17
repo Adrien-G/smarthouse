@@ -13,7 +13,7 @@ class ApiLinkyRepository implements LinkyRepository {
       'LINKY_API_BASE_URL',
       defaultValue: defaultBaseUrl,
     ),
-    this.timeout = const Duration(seconds: 8),
+    this.timeout = const Duration(seconds: 30),
     this.subscribedPowerKva = 15,
     this.energyPrices = TempoEnergyPrices.esStrasbourg20250801,
     this.hourlyHistoryCache,
@@ -58,11 +58,12 @@ class ApiLinkyRepository implements LinkyRepository {
   @override
   Future<LinkySnapshot> fetchCachedCurrentSnapshot() async {
     final rows = hourlyHistoryCache?.read(DateTime.now())?.rows ?? const [];
-    if (rows.isEmpty) {
+    if (!_isUsableHourlyCache(rows)) {
       throw const LinkyApiException('Aucune donnée du jour en cache');
     }
+    final current = _latestRow(rows) ?? rows.last;
     return _snapshotFromRows(
-      current: rows.last,
+      current: current,
       rows: rows,
       timestampFallback: DateTime.now(),
       tempoTomorrow: TempoDayColor.unknown,
@@ -75,8 +76,9 @@ class ApiLinkyRepository implements LinkyRepository {
     if (rows.isEmpty) {
       throw const LinkyApiException('Aucune donnée pour cette journée');
     }
+    final current = _latestRow(rows) ?? rows.last;
     return _snapshotFromRows(
-      current: rows.last,
+      current: current,
       rows: rows,
       timestampFallback: date,
       tempoTomorrow: TempoDayColor.unknown,
@@ -86,13 +88,14 @@ class ApiLinkyRepository implements LinkyRepository {
   @override
   Future<LinkySnapshot> fetchCachedDailySnapshot(DateTime date) async {
     final rows = hourlyHistoryCache?.read(date)?.rows ?? const [];
-    if (rows.isEmpty) {
+    if (!_isUsableHourlyCache(rows)) {
       throw const LinkyApiException(
         'Aucune donnée en cache pour cette journée',
       );
     }
+    final current = _latestRow(rows) ?? rows.last;
     return _snapshotFromRows(
-      current: rows.last,
+      current: current,
       rows: rows,
       timestampFallback: date,
       tempoTomorrow: TempoDayColor.unknown,
@@ -128,14 +131,15 @@ class ApiLinkyRepository implements LinkyRepository {
     required DateTime timestampFallback,
     required TempoDayColor tempoTomorrow,
   }) {
+    final sortedRows = _chronologicalRows(rows);
     final timestamp =
         _parseTimestamp(current['timestamp']) ?? timestampFallback;
     final currentIndexWh = _totalEnergyIndex(current);
-    final firstIndexWh = rows.isEmpty
+    final firstIndexWh = sortedRows.isEmpty
         ? currentIndexWh
-        : _totalEnergyIndex(rows.first);
+        : _totalEnergyIndex(sortedRows.first);
     final dailyConsumptionWh = math.max(0, currentIndexWh - firstIndexWh);
-    final firstRow = rows.isEmpty ? current : rows.first;
+    final firstRow = sortedRows.isEmpty ? current : sortedRows.first;
 
     return LinkySnapshot(
       timestamp: timestamp,
@@ -155,8 +159,8 @@ class ApiLinkyRepository implements LinkyRepository {
       currentTariffLabel: current['tariff_label']?.toString() ?? 'Inconnu',
       tempoToday: _tempoColor(current['tariff_label']),
       tempoTomorrow: tempoTomorrow,
-      hourlyConsumption: _hourlyConsumption(rows),
-      missingPastHours: _missingPastHours(rows),
+      hourlyConsumption: _hourlyConsumption(sortedRows, day: timestampFallback),
+      missingPastHours: _missingPastHours(sortedRows),
     );
   }
 
@@ -169,9 +173,20 @@ class ApiLinkyRepository implements LinkyRepository {
 
   Future<List<dynamic>> _getTodayHourlyHistoryOrEmpty() async {
     try {
-      return await _getHourlyRowsForDate(DateTime.now(), forceRefresh: true);
+      final rows = await _getHourlyRowsForDate(
+        DateTime.now(),
+        forceRefresh: true,
+      );
+      if (rows.isEmpty) {
+        throw const LinkyApiException('Historique horaire du jour vide');
+      }
+      return rows;
     } catch (_) {
-      return const [];
+      final cached = hourlyHistoryCache?.read(DateTime.now());
+      if (cached != null && _isUsableHourlyCache(cached.rows)) {
+        return cached.rows;
+      }
+      rethrow;
     }
   }
 
@@ -184,17 +199,24 @@ class ApiLinkyRepository implements LinkyRepository {
 
     if (cache != null && !forceRefresh) {
       final cached = cache.read(date);
-      if (cached != null && !cached.isEmpty) {
+      if (cached != null && _isUsableHourlyCache(cached.rows)) {
         return cached.rows;
       }
     }
 
-    final path =
-        '/api/linky/history?date=${_formatApiDate(date)}&resolution=hour';
+    final path = forceRefresh
+        ? '/api/linky/history?date=${_formatApiDate(date)}'
+        : '/api/linky/history?date=${_formatApiDate(date)}&resolution=hour';
     final history = await _getData(path) as List<dynamic>;
     final rows = history.whereType<Map<String, dynamic>>().toList();
 
     if (cache == null) {
+      return rows;
+    }
+
+    if (forceRefresh) {
+      final hourlyRows = _hourlySummaryRows(rows);
+      await cache.write(date, hourlyRows);
       return rows;
     }
 
@@ -204,6 +226,99 @@ class ApiLinkyRepository implements LinkyRepository {
 
     await cache.write(date, rows);
     return rows;
+  }
+
+  static List<Map<String, dynamic>> _hourlySummaryRows(
+    List<Map<String, dynamic>> rows,
+  ) {
+    final samples = _chronologicalRows(rows);
+    final buckets = <DateTime, Map<String, dynamic>>{};
+
+    for (var index = 0; index < samples.length; index++) {
+      final row = samples[index];
+      final timestamp = _parseTimestamp(row['timestamp']);
+      if (timestamp == null) {
+        continue;
+      }
+
+      final hour = DateTime(
+        timestamp.year,
+        timestamp.month,
+        timestamp.day,
+        timestamp.hour,
+      );
+      final bucket = buckets.putIfAbsent(hour, () {
+        return {
+          'timestamp': hour.toIso8601String(),
+          'tariff_label': row['tariff_label']?.toString() ?? '',
+          'consumption_wh': 0,
+          'is_peak_hour': _isPeakHour(row['tariff_label']),
+        };
+      });
+
+      if (index > 0) {
+        final previous = samples[index - 1];
+        bucket['consumption_wh'] =
+            readInt(bucket, 'consumption_wh') +
+            math.max(0, _totalEnergyIndex(row) - _totalEnergyIndex(previous));
+      }
+
+      bucket['tariff_label'] = row['tariff_label'] ?? bucket['tariff_label'];
+      bucket['is_peak_hour'] = _isPeakHour(bucket['tariff_label']);
+      for (var easfIndex = 1; easfIndex <= 6; easfIndex++) {
+        final key = 'easf${easfIndex.toString().padLeft(2, '0')}_wh';
+        bucket[key] = math.max(readInt(bucket, key), readInt(row, key));
+      }
+    }
+
+    final hours = buckets.keys.toList()..sort();
+    return [for (final hour in hours) buckets[hour]!];
+  }
+
+  static Map<String, dynamic>? _latestRow(List<Map<String, dynamic>> rows) {
+    final sortedRows = _chronologicalRows(rows);
+    if (sortedRows.isEmpty) {
+      return null;
+    }
+    return sortedRows.last;
+  }
+
+  static List<Map<String, dynamic>> _chronologicalRows(
+    List<Map<String, dynamic>> rows,
+  ) {
+    final sortedRows = [
+      for (final row in rows)
+        if (_parseTimestamp(row['timestamp']) != null) row,
+    ];
+    sortedRows.sort((left, right) {
+      return _parseTimestamp(
+        left['timestamp'],
+      )!.compareTo(_parseTimestamp(right['timestamp'])!);
+    });
+    return sortedRows;
+  }
+
+  static bool _isUsableHourlyCache(List<Map<String, dynamic>> rows) {
+    if (rows.isEmpty) {
+      return false;
+    }
+
+    final hasConsumptionField = rows.any(
+      (row) => row.containsKey('consumption_wh'),
+    );
+    if (!hasConsumptionField) {
+      return false;
+    }
+
+    final totalConsumptionWh = rows.fold<int>(
+      0,
+      (total, row) => total + readInt(row, 'consumption_wh'),
+    );
+    final totalIndexDeltaWh = math.max(
+      0,
+      _totalEnergyIndex(rows.last) - _totalEnergyIndex(rows.first),
+    );
+    return totalConsumptionWh > 0 || totalIndexDeltaWh == 0;
   }
 
   static bool _isSameDay(DateTime left, DateTime right) {
@@ -298,9 +413,11 @@ class ApiLinkyRepository implements LinkyRepository {
   }
 
   static List<HourlyConsumption> _hourlyConsumption(
-    List<Map<String, dynamic>> rows,
-  ) {
-    if (rows.length < 2) {
+    List<Map<String, dynamic>> rows, {
+    required DateTime day,
+  }) {
+    final samples = _chronologicalRows(rows);
+    if (samples.isEmpty) {
       final now = DateTime.now();
       return [
         for (var hour = 0; hour < 24; hour++)
@@ -308,22 +425,73 @@ class ApiLinkyRepository implements LinkyRepository {
             hour: DateTime(now.year, now.month, now.day, hour),
             consumptionWh: 0,
             tempoColor: TempoDayColor.unknown,
+            isPeakHour: false,
           ),
       ];
     }
 
     final buckets = <DateTime, int>{};
     final bucketColors = <DateTime, TempoDayColor>{};
-    for (var index = 1; index < rows.length; index++) {
-      final previous = rows[index - 1];
-      final current = rows[index];
+    final bucketPeakHours = <DateTime, bool>{};
+    final hasExplicitHourlyConsumption = samples.any(
+      (row) => row.containsKey('consumption_wh'),
+    );
+
+    if (hasExplicitHourlyConsumption) {
+      for (final row in samples) {
+        final timestamp = _parseTimestamp(row['timestamp']);
+        if (timestamp == null) {
+          continue;
+        }
+
+        final hour = DateTime(
+          timestamp.year,
+          timestamp.month,
+          timestamp.day,
+          timestamp.hour,
+        );
+        buckets[hour] = (buckets[hour] ?? 0) + readInt(row, 'consumption_wh');
+        bucketColors[hour] = _tempoColor(row['tariff_label']);
+        bucketPeakHours[hour] = _isPeakHour(row['tariff_label']);
+      }
+    } else {
+      _addRawHourlyDeltas(samples, buckets, bucketColors, bucketPeakHours);
+    }
+
+    final start = DateTime(day.year, day.month, day.day);
+    return [
+      for (var hour = 0; hour < 24; hour++)
+        HourlyConsumption(
+          hour: start.add(Duration(hours: hour)),
+          consumptionWh: math.max(
+            0,
+            buckets[start.add(Duration(hours: hour))] ?? 0,
+          ),
+          tempoColor:
+              bucketColors[start.add(Duration(hours: hour))] ??
+              TempoDayColor.unknown,
+          isPeakHour:
+              bucketPeakHours[start.add(Duration(hours: hour))] ?? false,
+        ),
+    ];
+  }
+
+  static void _addRawHourlyDeltas(
+    List<Map<String, dynamic>> samples,
+    Map<DateTime, int> buckets,
+    Map<DateTime, TempoDayColor> bucketColors,
+    Map<DateTime, bool> bucketPeakHours,
+  ) {
+    for (var index = 1; index < samples.length; index++) {
+      final previous = samples[index - 1];
+      final current = samples[index];
       final timestamp = _parseTimestamp(current['timestamp']);
       if (timestamp == null) {
         continue;
       }
 
       final delta = _totalEnergyIndex(current) - _totalEnergyIndex(previous);
-      if (delta < 0) {
+      if (delta <= 0) {
         continue;
       }
 
@@ -334,26 +502,9 @@ class ApiLinkyRepository implements LinkyRepository {
         timestamp.hour,
       );
       buckets[hour] = (buckets[hour] ?? 0) + delta;
-      bucketColors[hour] = _tempoColor(current['tariff_label']);
+      bucketColors[hour] = _hourTempoColor(previous, current);
+      bucketPeakHours[hour] = _isPeakHour(current['tariff_label']);
     }
-
-    final firstTimestamp =
-        _parseTimestamp(rows.first['timestamp']) ?? DateTime.now();
-    final start = DateTime(
-      firstTimestamp.year,
-      firstTimestamp.month,
-      firstTimestamp.day,
-    );
-    return [
-      for (var hour = 0; hour < 24; hour++)
-        HourlyConsumption(
-          hour: start.add(Duration(hours: hour)),
-          consumptionWh: buckets[start.add(Duration(hours: hour))] ?? 0,
-          tempoColor:
-              bucketColors[start.add(Duration(hours: hour))] ??
-              TempoDayColor.unknown,
-        ),
-    ];
   }
 
   static List<DateTime> _missingPastHours(List<Map<String, dynamic>> rows) {
@@ -417,11 +568,58 @@ class ApiLinkyRepository implements LinkyRepository {
     return TempoDayColor.unknown;
   }
 
+  static bool _isPeakHour(Object? label) {
+    final value = label?.toString().toUpperCase() ?? '';
+    return value.contains('HP');
+  }
+
+  static TempoDayColor _hourTempoColor(
+    Map<String, dynamic> previous,
+    Map<String, dynamic> current,
+  ) {
+    final fromLabel = _tempoColor(current['tariff_label']);
+    if (fromLabel != TempoDayColor.unknown) {
+      return fromLabel;
+    }
+
+    final deltas = <TempoDayColor, int>{
+      TempoDayColor.blue:
+          _positiveDelta(previous, current, 'easf01_wh') +
+          _positiveDelta(previous, current, 'easf02_wh'),
+      TempoDayColor.white:
+          _positiveDelta(previous, current, 'easf03_wh') +
+          _positiveDelta(previous, current, 'easf04_wh'),
+      TempoDayColor.red:
+          _positiveDelta(previous, current, 'easf05_wh') +
+          _positiveDelta(previous, current, 'easf06_wh'),
+    };
+
+    var bestColor = TempoDayColor.unknown;
+    var bestDelta = 0;
+    for (final entry in deltas.entries) {
+      if (entry.value > bestDelta) {
+        bestDelta = entry.value;
+        bestColor = entry.key;
+      }
+    }
+    return bestColor;
+  }
+
+  static int _positiveDelta(
+    Map<String, dynamic> previous,
+    Map<String, dynamic> current,
+    String key,
+  ) {
+    return math.max(0, readInt(current, key) - readInt(previous, key));
+  }
+
   static DateTime? _parseTimestamp(Object? value) {
     if (value == null) {
       return null;
     }
-    return DateTime.tryParse(value.toString());
+    final text = value.toString().trim();
+    return DateTime.tryParse(text) ??
+        DateTime.tryParse(text.replaceFirst(' ', 'T'));
   }
 
   static int readInt(Map<String, dynamic> row, String key) {

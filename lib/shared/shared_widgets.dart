@@ -173,12 +173,14 @@ class ErrorView extends StatelessWidget {
     required this.error,
     required this.onRetry,
     required this.onChangeApiBaseUrl,
+    this.onClearCache,
   });
 
   final String apiBaseUrl;
   final Object? error;
   final VoidCallback onRetry;
   final ValueChanged<String> onChangeApiBaseUrl;
+  final Future<void> Function()? onClearCache;
 
   @override
   Widget build(BuildContext context) {
@@ -231,6 +233,7 @@ class ErrorView extends StatelessWidget {
                 context: context,
                 currentValue: apiBaseUrl,
                 onSubmitted: onChangeApiBaseUrl,
+                onClearCache: onClearCache,
               ),
               icon: const Icon(Icons.settings),
               label: const Text("Changer l'adresse"),
@@ -246,6 +249,7 @@ Future<void> showApiBaseUrlDialog({
   required BuildContext context,
   required String currentValue,
   required ValueChanged<String> onSubmitted,
+  Future<void> Function()? onClearCache,
 }) async {
   final controller = TextEditingController(text: currentValue);
 
@@ -254,6 +258,7 @@ Future<void> showApiBaseUrlDialog({
     builder: (context) {
       String? testMessage;
       var isTesting = false;
+      var isClearingCache = false;
 
       return StatefulBuilder(
         builder: (context, setDialogState) {
@@ -281,6 +286,29 @@ Future<void> showApiBaseUrlDialog({
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
+                    ),
+                  ),
+                ],
+                if (onClearCache != null) ...[
+                  const SizedBox(height: 16),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      onPressed: isClearingCache
+                          ? null
+                          : () async {
+                              setDialogState(() {
+                                isClearingCache = true;
+                                testMessage = 'Suppression du cache...';
+                              });
+                              await onClearCache();
+                              setDialogState(() {
+                                isClearingCache = false;
+                                testMessage = 'Cache local vidé.';
+                              });
+                            },
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text('Vider le cache'),
                     ),
                   ),
                 ],
@@ -342,7 +370,7 @@ Future<String> _testApiHealth(String baseUrl) async {
   try {
     final response = await http
         .get(Uri.parse('$baseUrl/api/health'))
-        .timeout(const Duration(seconds: 3));
+        .timeout(const Duration(seconds: 10));
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return 'Connexion OK sur $baseUrl';
     }

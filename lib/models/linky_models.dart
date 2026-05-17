@@ -122,11 +122,13 @@ class HourlyConsumption {
     required this.hour,
     required this.consumptionWh,
     required this.tempoColor,
+    required this.isPeakHour,
   });
 
   final DateTime hour;
   final int consumptionWh;
   final TempoDayColor tempoColor;
+  final bool isPeakHour;
 
   double get consumptionKwh => consumptionWh / 1000;
 }
