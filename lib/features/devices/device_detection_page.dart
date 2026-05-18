@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../data/detected_devices.dart';
 import '../../models/linky_models.dart';
 import '../../shared/shared_widgets.dart';
 
@@ -18,9 +19,28 @@ class _DeviceDetectionPageState extends State<DeviceDetectionPage> {
   _DevicePowerSample? _baseline;
   _DevicePowerSample? _powered;
   _DeviceDetectionResult? _result;
+  List<DetectedDevice> _savedDevices = const [];
   Object? _error;
   var _measuringBaseline = false;
   var _measuringPowered = false;
+  var _loadingDevices = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedDevices();
+  }
+
+  Future<void> _loadSavedDevices() async {
+    final devices = await DetectedDeviceStore.load();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _savedDevices = devices;
+      _loadingDevices = false;
+    });
+  }
 
   Future<void> _measureBaseline() async {
     await _measure(
@@ -90,6 +110,137 @@ class _DeviceDetectionPageState extends State<DeviceDetectionPage> {
     });
   }
 
+  Future<void> _saveResult() async {
+    final result = _result;
+    if (result == null) {
+      return;
+    }
+
+    final details = await _askDeviceDetails();
+    if (details == null || details.name.trim().isEmpty) {
+      return;
+    }
+
+    final device = DetectedDevice(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      name: details.name.trim(),
+      note: details.note.trim(),
+      savedAt: DateTime.now(),
+      totalW: result.totalDeltaW,
+      phase1W: result.phase1DeltaW,
+      phase2W: result.phase2DeltaW,
+      phase3W: result.phase3DeltaW,
+      mainPhaseLabel: result.mainPhaseLabel,
+    );
+    final devices = [device, ..._savedDevices];
+    await DetectedDeviceStore.save(devices);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _savedDevices = devices;
+    });
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('${device.name} enregistre')));
+  }
+
+  Future<_DeviceEditDetails?> _askDeviceDetails({DetectedDevice? device}) {
+    final nameController = TextEditingController(text: device?.name ?? '');
+    final noteController = TextEditingController(text: device?.note ?? '');
+    return showDialog<_DeviceEditDetails>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(device == null ? 'Enregistrer appareil' : 'Modifier'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Nom',
+                  hintText: 'Ex : four, pompe, seche serviette',
+                ),
+                textInputAction: TextInputAction.next,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: noteController,
+                decoration: const InputDecoration(
+                  labelText: 'Note',
+                  hintText: 'Piece, contexte, mode utilise...',
+                ),
+                maxLines: 2,
+                textInputAction: TextInputAction.done,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(context).pop(
+                  _DeviceEditDetails(
+                    name: nameController.text,
+                    note: noteController.text,
+                  ),
+                );
+              },
+              child: Text(device == null ? 'Enregistrer' : 'Modifier'),
+            ),
+          ],
+        );
+      },
+    ).whenComplete(() {
+      nameController.dispose();
+      noteController.dispose();
+    });
+  }
+
+  Future<void> _editDevice(DetectedDevice device) async {
+    final details = await _askDeviceDetails(device: device);
+    if (details == null || details.name.trim().isEmpty) {
+      return;
+    }
+
+    final devices = [
+      for (final savedDevice in _savedDevices)
+        if (savedDevice.id == device.id)
+          savedDevice.copyWith(
+            name: details.name.trim(),
+            note: details.note.trim(),
+          )
+        else
+          savedDevice,
+    ];
+    await DetectedDeviceStore.save(devices);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _savedDevices = devices;
+    });
+  }
+
+  Future<void> _deleteDevice(DetectedDevice device) async {
+    final devices = [
+      for (final savedDevice in _savedDevices)
+        if (savedDevice.id != device.id) savedDevice,
+    ];
+    await DetectedDeviceStore.save(devices);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _savedDevices = devices;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final compact = MediaQuery.sizeOf(context).width < 720;
@@ -122,8 +273,15 @@ class _DeviceDetectionPageState extends State<DeviceDetectionPage> {
           ),
           if (_result != null) ...[
             const SizedBox(height: 18),
-            _DeviceDetectionResultCard(result: _result!),
+            _DeviceDetectionResultCard(result: _result!, onSave: _saveResult),
           ],
+          const SizedBox(height: 18),
+          _SavedDevicesList(
+            devices: _savedDevices,
+            loading: _loadingDevices,
+            onEdit: _editDevice,
+            onDelete: _deleteDevice,
+          ),
         ],
       ),
     );
@@ -316,9 +474,13 @@ class _MeasureStep extends StatelessWidget {
 }
 
 class _DeviceDetectionResultCard extends StatelessWidget {
-  const _DeviceDetectionResultCard({required this.result});
+  const _DeviceDetectionResultCard({
+    required this.result,
+    required this.onSave,
+  });
 
   final _DeviceDetectionResult result;
+  final VoidCallback onSave;
 
   @override
   Widget build(BuildContext context) {
@@ -380,7 +542,202 @@ class _DeviceDetectionResultCard extends StatelessWidget {
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
+            const SizedBox(height: 14),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: onSave,
+                icon: const Icon(Icons.save),
+                label: const Text('Enregistrer'),
+              ),
+            ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SavedDevicesList extends StatelessWidget {
+  const _SavedDevicesList({
+    required this.devices,
+    required this.loading,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final List<DetectedDevice> devices;
+  final bool loading;
+  final ValueChanged<DetectedDevice> onEdit;
+  final ValueChanged<DetectedDevice> onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SectionHeader(
+          title: 'Appareils enregistres',
+          subtitle: 'Estimations locales',
+          trailing: Text(
+            '${devices.length}',
+            style: theme.textTheme.labelLarge,
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (loading)
+          const SizedBox(
+            height: 96,
+            child: LoadingView(message: 'Chargement...'),
+          )
+        else if (devices.isEmpty)
+          const EmptyHistoryMessage(
+            icon: Icons.electrical_services,
+            title: 'Aucun appareil',
+            message: 'Lance une detection puis enregistre le resultat.',
+          )
+        else
+          Column(
+            children: [
+              for (final device in devices) ...[
+                _SavedDeviceTile(
+                  device: device,
+                  onEdit: onEdit,
+                  onDelete: onDelete,
+                ),
+                const SizedBox(height: 10),
+              ],
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+class _SavedDeviceTile extends StatelessWidget {
+  const _SavedDeviceTile({
+    required this.device,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final DetectedDevice device;
+  final ValueChanged<DetectedDevice> onEdit;
+  final ValueChanged<DetectedDevice> onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xffe1e5dc)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            const Icon(Icons.electrical_services, color: Color(0xff1f7a5c)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    device.name,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${device.mainPhaseLabel} - ${formatDate(device.savedAt)}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (device.note.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      device.note,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      _MiniDelta(label: 'P1', value: device.phase1W),
+                      _MiniDelta(label: 'P2', value: device.phase2W),
+                      _MiniDelta(label: 'P3', value: device.phase3W),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  _formatPower(device.totalW),
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      onPressed: () => onEdit(device),
+                      tooltip: 'Modifier',
+                      icon: const Icon(Icons.edit_outlined),
+                    ),
+                    IconButton(
+                      onPressed: () => onDelete(device),
+                      tooltip: 'Supprimer',
+                      icon: const Icon(Icons.delete_outline),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniDelta extends StatelessWidget {
+  const _MiniDelta({required this.label, required this.value});
+
+  final String label;
+  final int value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xfff6f7f3),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Text(
+          '$label ${_formatPower(value)}',
+          style: theme.textTheme.labelMedium?.copyWith(
+            fontWeight: FontWeight.w800,
+          ),
         ),
       ),
     );
@@ -533,6 +890,13 @@ class _DeviceDetectionResult {
       phase3DeltaW: powered.phase3W - baseline.phase3W,
     );
   }
+}
+
+class _DeviceEditDetails {
+  const _DeviceEditDetails({required this.name, required this.note});
+
+  final String name;
+  final String note;
 }
 
 String _formatPower(int watts) {
