@@ -220,29 +220,27 @@ class _InstantContent extends StatelessWidget {
 
     return Column(
       children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            _PhaseStat(
+        _PhaseTable(
+          readings: [
+            _PhaseReading(
               label: 'Phase 1',
               currentW: latest.phase1Va,
               labelColor: _InstantPhasesChartPainter.phase1Color,
               trend: _phaseTrend(snapshot.points, (point) => point.phase1Va),
             ),
-            _PhaseStat(
+            _PhaseReading(
               label: 'Phase 2',
               currentW: latest.phase2Va,
               labelColor: _InstantPhasesChartPainter.phase2Color,
               trend: _phaseTrend(snapshot.points, (point) => point.phase2Va),
             ),
-            _PhaseStat(
+            _PhaseReading(
               label: 'Phase 3',
               currentW: latest.phase3Va,
               labelColor: _InstantPhasesChartPainter.phase3Color,
               trend: _phaseTrend(snapshot.points, (point) => point.phase3Va),
             ),
-            _PhaseStat(
+            _PhaseReading(
               label: 'Total',
               currentW: latest.totalVa,
               labelColor: null,
@@ -565,7 +563,7 @@ class _InstantPhasesChartPainter extends CustomPainter {
   final Color labelColor;
   final Color gridColor;
 
-  static const labelHeight = 48.0;
+  static const labelHeight = 28.0;
   static const yAxisWidth = 56.0;
   static const phase1Color = Color(0xffd97706);
   static const phase2Color = Color(0xff2563eb);
@@ -640,7 +638,6 @@ class _InstantPhasesChartPainter extends CustomPainter {
 
     _drawSelectedPoint(canvas, chartWidth, chartHeight, yAxisWidth, scaleMax);
     _drawTimeLabels(canvas, chartHeight + 8, chartWidth, yAxisWidth);
-    _drawLegend(canvas, size, chartHeight + 30);
   }
 
   void _drawSelectedPoint(
@@ -713,21 +710,6 @@ class _InstantPhasesChartPainter extends CustomPainter {
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round,
     );
-  }
-
-  void _drawLegend(Canvas canvas, Size size, double y) {
-    final items = [
-      ('P1', phase1Color),
-      ('P2', phase2Color),
-      ('P3', phase3Color),
-    ];
-    var x = 46.0;
-    for (final item in items) {
-      final paint = Paint()..color = item.$2;
-      canvas.drawCircle(Offset(x, y + 7), 4, paint);
-      _drawLabel(canvas, item.$1, Offset(x + 20, y), width: 24);
-      x += 52;
-    }
   }
 
   void _drawTimeLabels(
@@ -891,8 +873,8 @@ class _InstantPhasesChartPainter extends CustomPainter {
   }
 }
 
-class _PhaseStat extends StatelessWidget {
-  const _PhaseStat({
+class _PhaseReading {
+  const _PhaseReading({
     required this.label,
     required this.currentW,
     required this.labelColor,
@@ -903,10 +885,149 @@ class _PhaseStat extends StatelessWidget {
   final int currentW;
   final Color? labelColor;
   final _PhaseTrend trend;
+}
+
+class _PhaseTable extends StatelessWidget {
+  const _PhaseTable({required this.readings});
+
+  final List<_PhaseReading> readings;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xffe1e5dc)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  flex: 4,
+                  child: Text(
+                    'Phase',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 3,
+                  child: Text(
+                    'Puissance',
+                    textAlign: TextAlign.right,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 18),
+                Expanded(
+                  flex: 3,
+                  child: Text(
+                    'Tendance',
+                    textAlign: TextAlign.right,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 14),
+            for (var index = 0; index < readings.length; index++) ...[
+              _PhaseTableRow(reading: readings[index]),
+              if (index != readings.length - 1)
+                Divider(
+                  height: readings[index + 1].label == 'Total' ? 16 : 12,
+                  thickness: readings[index + 1].label == 'Total' ? 1.4 : 1,
+                  color: readings[index + 1].label == 'Total'
+                      ? const Color(0xffb8c0b4)
+                      : null,
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PhaseTableRow extends StatelessWidget {
+  const _PhaseTableRow({required this.reading});
+
+  final _PhaseReading reading;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final labelColor = reading.labelColor ?? theme.colorScheme.onSurfaceVariant;
+    final labelWeight = reading.labelColor == null
+        ? FontWeight.w700
+        : FontWeight.w900;
+    final trend = _trendPresentation(reading.trend);
+
+    return Row(
+      children: [
+        Expanded(
+          flex: 4,
+          child: Text(
+            reading.label,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: labelColor,
+              fontWeight: labelWeight,
+            ),
+          ),
+        ),
+        Expanded(
+          flex: 3,
+          child: Text(
+            _formatInstantWatts(reading.currentW),
+            textAlign: TextAlign.right,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        const SizedBox(width: 18),
+        Expanded(
+          flex: 3,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Icon(trend.icon, size: 16, color: trend.color),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text(
+                  trend.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: trend.color,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  ({Color color, IconData icon, String label}) _trendPresentation(
+    _PhaseTrend trend,
+  ) {
     final trendColor = switch (trend) {
       _PhaseTrend.up => const Color(0xffb91c1c),
       _PhaseTrend.stable => const Color(0xff4b5563),
@@ -922,64 +1043,6 @@ class _PhaseStat extends StatelessWidget {
       _PhaseTrend.stable => 'Stable',
       _PhaseTrend.down => 'En baisse',
     };
-
-    return SizedBox(
-      width: math.min(MediaQuery.sizeOf(context).width - 32, 156),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xffe1e5dc)),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      label,
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: labelColor ?? theme.colorScheme.onSurfaceVariant,
-                        fontWeight: labelColor == null
-                            ? FontWeight.w700
-                            : FontWeight.w900,
-                      ),
-                    ),
-                  ),
-                  Icon(trendIcon, size: 16, color: trendColor),
-                ],
-              ),
-              const SizedBox(height: 3),
-              Text(
-                _formatInstantPower(currentW),
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                trendLabel,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: trendColor,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _formatInstantPower(int watts) {
-    if (watts >= 1000) {
-      return '${(watts / 1000).toStringAsFixed(2)} kW';
-    }
-    return '$watts W';
+    return (color: trendColor, icon: trendIcon, label: trendLabel);
   }
 }
