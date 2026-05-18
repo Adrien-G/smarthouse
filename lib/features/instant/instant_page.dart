@@ -221,8 +221,8 @@ class _InstantContent extends StatelessWidget {
     return Column(
       children: [
         Wrap(
-          spacing: 10,
-          runSpacing: 10,
+          spacing: 8,
+          runSpacing: 8,
           children: [
             _PhaseStat(
               label: 'Phase 1',
@@ -250,15 +250,15 @@ class _InstantContent extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 18),
-        _PossibleDevicesCard(latest: latest, devices: devices),
-        const SizedBox(height: 18),
+        const SizedBox(height: 14),
         SizedBox(
           height: 280,
           child: _InstantPhasesChart(points: snapshot.points),
         ),
         const SizedBox(height: 10),
         Text('Dernière mesure à ${formatTime(latest.timestamp)}'),
+        const SizedBox(height: 14),
+        _PossibleDevicesCard(latest: latest, devices: devices),
       ],
     );
   }
@@ -924,7 +924,7 @@ class _PhaseStat extends StatelessWidget {
     };
 
     return SizedBox(
-      width: math.min(MediaQuery.sizeOf(context).width - 32, 180),
+      width: math.min(MediaQuery.sizeOf(context).width - 32, 156),
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: Colors.white,
@@ -932,39 +932,42 @@ class _PhaseStat extends StatelessWidget {
           border: Border.all(color: const Color(0xffe1e5dc)),
         ),
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                label,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: labelColor ?? theme.colorScheme.onSurfaceVariant,
-                  fontWeight: labelColor == null ? null : FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _formatInstantPower(currentW),
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 6),
               Row(
                 children: [
-                  Icon(trendIcon, size: 18, color: trendColor),
-                  const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      trendLabel,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: trendColor,
-                        fontWeight: FontWeight.w700,
+                      label,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: labelColor ?? theme.colorScheme.onSurfaceVariant,
+                        fontWeight: labelColor == null
+                            ? FontWeight.w700
+                            : FontWeight.w900,
                       ),
                     ),
                   ),
+                  Icon(trendIcon, size: 16, color: trendColor),
                 ],
+              ),
+              const SizedBox(height: 3),
+              Text(
+                _formatInstantPower(currentW),
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                trendLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: trendColor,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ],
           ),
