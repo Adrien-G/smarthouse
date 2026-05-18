@@ -253,9 +253,7 @@ class _InstantContent extends StatelessWidget {
           height: 280,
           child: _InstantPhasesChart(points: snapshot.points),
         ),
-        const SizedBox(height: 10),
-        Text('Dernière mesure à ${formatTime(latest.timestamp)}'),
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
         _PossibleDevicesCard(latest: latest, devices: devices),
       ],
     );

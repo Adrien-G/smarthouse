@@ -142,7 +142,7 @@ class _DeviceDetectionPageState extends State<DeviceDetectionPage> {
     });
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text('${device.name} enregistre')));
+    ).showSnackBar(SnackBar(content: Text('${device.name} enregistré')));
   }
 
   Future<_DeviceEditDetails?> _askDeviceDetails({DetectedDevice? device}) {
@@ -171,7 +171,7 @@ class _DeviceDetectionPageState extends State<DeviceDetectionPage> {
                   autofocus: true,
                   decoration: const InputDecoration(
                     labelText: 'Nom',
-                    hintText: 'Ex : four, pompe, seche serviette',
+                    hintText: 'Ex : four, pompe, sèche-serviette',
                   ),
                   textInputAction: TextInputAction.next,
                 ),
@@ -180,7 +180,7 @@ class _DeviceDetectionPageState extends State<DeviceDetectionPage> {
                   controller: noteController,
                   decoration: const InputDecoration(
                     labelText: 'Note',
-                    hintText: 'Piece, contexte, mode utilise...',
+                    hintText: 'Pièce, contexte, mode utilisé...',
                   ),
                   maxLines: 2,
                   textInputAction: TextInputAction.done,
@@ -382,7 +382,7 @@ class _DeviceDetectionHeader extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'Estimation avant / apres allumage',
+          'Estimation avant / après allumage',
           style: theme.textTheme.bodyMedium?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
@@ -426,10 +426,10 @@ class _DeviceDetectionSteps extends StatelessWidget {
           children: [
             _MeasureStep(
               index: 1,
-              title: 'Reference',
+              title: 'Référence',
               detail: baseline == null
-                  ? 'Laisse l appareil eteint puis lance une mesure.'
-                  : 'Mesuree a ${formatTime(baseline!.measuredAt)}',
+                  ? "Laisse l'appareil éteint puis lance une mesure."
+                  : 'Mesurée à ${formatTime(baseline!.measuredAt)}',
               value: baseline == null ? null : _formatPower(baseline!.totalW),
               loading: measuringBaseline,
               buttonLabel: baseline == null ? 'Mesurer' : 'Reprendre',
@@ -438,10 +438,10 @@ class _DeviceDetectionSteps extends StatelessWidget {
             const Divider(height: 24),
             _MeasureStep(
               index: 2,
-              title: 'Appareil allume',
+              title: 'Appareil allumé',
               detail: baseline == null
-                  ? 'Mesure d abord la reference.'
-                  : 'Allume l appareil, attends quelques secondes, puis mesure.',
+                  ? "Mesure d'abord la référence."
+                  : "Allume l'appareil, attends quelques secondes, puis mesure.",
               value: powered == null ? null : _formatPower(powered!.totalW),
               loading: measuringPowered,
               buttonLabel: powered == null ? 'Mesurer' : 'Reprendre',
@@ -574,7 +574,7 @@ class _DeviceDetectionResultCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Resultat estime',
+              'Résultat estimé',
               style: theme.textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w900,
               ),
@@ -671,7 +671,7 @@ class _SavedDevicesList extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SectionHeader(
-          title: 'Appareils enregistres',
+          title: 'Appareils enregistrés',
           subtitle: 'Estimations locales',
           trailing: Text(
             '${devices.length}',
@@ -688,7 +688,7 @@ class _SavedDevicesList extends StatelessWidget {
           const EmptyHistoryMessage(
             icon: Icons.electrical_services,
             title: 'Aucun appareil',
-            message: 'Lance une detection puis enregistre le resultat.',
+            message: 'Lance une détection puis enregistre le résultat.',
           )
         else
           Column(
@@ -899,7 +899,7 @@ class _DevicePowerSample {
 
   static _DevicePowerSample fromPoints(List<PhaseInstantPoint> points) {
     if (points.isEmpty) {
-      throw StateError('Aucune mesure instantanee disponible');
+      throw StateError('Aucune mesure instantanée disponible');
     }
 
     final sorted = [...points]
@@ -964,12 +964,12 @@ class _DeviceDetectionResult {
 
   String get hint {
     if (totalDeltaW.abs() < 50) {
-      return 'Variation faible : la mesure est peut-etre noyee dans le bruit de fond.';
+      return 'Variation faible : la mesure est peut-être noyée dans le bruit de fond.';
     }
     if (totalDeltaW < 0) {
-      return 'La puissance a baisse entre les deux mesures. Un autre appareil a peut-etre change d etat.';
+      return "La puissance a baissé entre les deux mesures. Un autre appareil a peut-être changé d'état.";
     }
-    return 'Estimation basee sur la difference entre les deux mesures. Un appareil variable peut donner un resultat approximatif.';
+    return 'Estimation basée sur la différence entre les deux mesures. Un appareil variable peut donner un résultat approximatif.';
   }
 
   static _DeviceDetectionResult fromSamples(
