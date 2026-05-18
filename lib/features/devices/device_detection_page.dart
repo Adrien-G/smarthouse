@@ -148,34 +148,72 @@ class _DeviceDetectionPageState extends State<DeviceDetectionPage> {
   Future<_DeviceEditDetails?> _askDeviceDetails({DetectedDevice? device}) {
     final nameController = TextEditingController(text: device?.name ?? '');
     final noteController = TextEditingController(text: device?.note ?? '');
+    final phase1Controller = TextEditingController(
+      text: device?.phase1W.toString() ?? '',
+    );
+    final phase2Controller = TextEditingController(
+      text: device?.phase2W.toString() ?? '',
+    );
+    final phase3Controller = TextEditingController(
+      text: device?.phase3W.toString() ?? '',
+    );
     return showDialog<_DeviceEditDetails>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: Text(device == null ? 'Enregistrer appareil' : 'Modifier'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Nom',
-                  hintText: 'Ex : four, pompe, seche serviette',
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Nom',
+                    hintText: 'Ex : four, pompe, seche serviette',
+                  ),
+                  textInputAction: TextInputAction.next,
                 ),
-                textInputAction: TextInputAction.next,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: noteController,
-                decoration: const InputDecoration(
-                  labelText: 'Note',
-                  hintText: 'Piece, contexte, mode utilise...',
+                const SizedBox(height: 12),
+                TextField(
+                  controller: noteController,
+                  decoration: const InputDecoration(
+                    labelText: 'Note',
+                    hintText: 'Piece, contexte, mode utilise...',
+                  ),
+                  maxLines: 2,
+                  textInputAction: TextInputAction.done,
                 ),
-                maxLines: 2,
-                textInputAction: TextInputAction.done,
-              ),
-            ],
+                if (device != null) ...[
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _PhaseValueField(
+                          controller: phase1Controller,
+                          label: 'Phase 1',
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _PhaseValueField(
+                          controller: phase2Controller,
+                          label: 'Phase 2',
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _PhaseValueField(
+                          controller: phase3Controller,
+                          label: 'Phase 3',
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -188,6 +226,9 @@ class _DeviceDetectionPageState extends State<DeviceDetectionPage> {
                   _DeviceEditDetails(
                     name: nameController.text,
                     note: noteController.text,
+                    phase1W: _parseWatts(phase1Controller.text),
+                    phase2W: _parseWatts(phase2Controller.text),
+                    phase3W: _parseWatts(phase3Controller.text),
                   ),
                 );
               },
@@ -199,6 +240,9 @@ class _DeviceDetectionPageState extends State<DeviceDetectionPage> {
     ).whenComplete(() {
       nameController.dispose();
       noteController.dispose();
+      phase1Controller.dispose();
+      phase2Controller.dispose();
+      phase3Controller.dispose();
     });
   }
 
@@ -214,6 +258,15 @@ class _DeviceDetectionPageState extends State<DeviceDetectionPage> {
           savedDevice.copyWith(
             name: details.name.trim(),
             note: details.note.trim(),
+            phase1W: details.phase1W ?? savedDevice.phase1W,
+            phase2W: details.phase2W ?? savedDevice.phase2W,
+            phase3W: details.phase3W ?? savedDevice.phase3W,
+            totalW: _sumEditedPhases(details, savedDevice),
+            mainPhaseLabel: _mainPhaseLabel(
+              details.phase1W ?? savedDevice.phase1W,
+              details.phase2W ?? savedDevice.phase2W,
+              details.phase3W ?? savedDevice.phase3W,
+            ),
           )
         else
           savedDevice,
@@ -225,6 +278,29 @@ class _DeviceDetectionPageState extends State<DeviceDetectionPage> {
     setState(() {
       _savedDevices = devices;
     });
+  }
+
+  int _sumEditedPhases(_DeviceEditDetails details, DetectedDevice fallback) {
+    return (details.phase1W ?? fallback.phase1W) +
+        (details.phase2W ?? fallback.phase2W) +
+        (details.phase3W ?? fallback.phase3W);
+  }
+
+  String _mainPhaseLabel(int phase1W, int phase2W, int phase3W) {
+    final values = [phase1W.abs(), phase2W.abs(), phase3W.abs()];
+    final maxValue = values.reduce(math.max);
+    if (maxValue < 30) {
+      return 'Variation faible';
+    }
+    return 'Surtout phase ${values.indexOf(maxValue) + 1}';
+  }
+
+  int? _parseWatts(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    return int.tryParse(trimmed);
   }
 
   Future<void> _deleteDevice(DetectedDevice device) async {
@@ -554,6 +630,22 @@ class _DeviceDetectionResultCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _PhaseValueField extends StatelessWidget {
+  const _PhaseValueField({required this.controller, required this.label});
+
+  final TextEditingController controller;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      decoration: InputDecoration(labelText: label, suffixText: 'W'),
+      keyboardType: const TextInputType.numberWithOptions(signed: true),
     );
   }
 }
@@ -893,10 +985,19 @@ class _DeviceDetectionResult {
 }
 
 class _DeviceEditDetails {
-  const _DeviceEditDetails({required this.name, required this.note});
+  const _DeviceEditDetails({
+    required this.name,
+    required this.note,
+    required this.phase1W,
+    required this.phase2W,
+    required this.phase3W,
+  });
 
   final String name;
   final String note;
+  final int? phase1W;
+  final int? phase2W;
+  final int? phase3W;
 }
 
 String _formatPower(int watts) {

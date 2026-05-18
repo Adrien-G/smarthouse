@@ -39,17 +39,25 @@ class DetectedDevice {
     };
   }
 
-  DetectedDevice copyWith({String? name, String? note}) {
+  DetectedDevice copyWith({
+    String? name,
+    String? note,
+    int? totalW,
+    int? phase1W,
+    int? phase2W,
+    int? phase3W,
+    String? mainPhaseLabel,
+  }) {
     return DetectedDevice(
       id: id,
       name: name ?? this.name,
       note: note ?? this.note,
       savedAt: savedAt,
-      totalW: totalW,
-      phase1W: phase1W,
-      phase2W: phase2W,
-      phase3W: phase3W,
-      mainPhaseLabel: mainPhaseLabel,
+      totalW: totalW ?? this.totalW,
+      phase1W: phase1W ?? this.phase1W,
+      phase2W: phase2W ?? this.phase2W,
+      phase3W: phase3W ?? this.phase3W,
+      mainPhaseLabel: mainPhaseLabel ?? this.mainPhaseLabel,
     );
   }
 
