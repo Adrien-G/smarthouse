@@ -1,6 +1,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../data/api_linky_repository.dart';
+import '../features/electricity/data/api_linky_repository.dart';
 
 class AppSettings {
   const AppSettings({required this.apiBaseUrl});

@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
-import '../data/api_linky_repository.dart';
-import '../data/history_day_cache.dart';
-import '../features/history/history_page.dart';
-import '../features/instant/instant_page.dart';
-import '../features/today/today_page.dart';
-import '../models/linky_models.dart';
+import '../features/electricity/data/api_linky_repository.dart';
+import '../features/electricity/data/history_day_cache.dart';
+import '../features/electricity/history/history_page.dart';
+import '../features/electricity/instant/instant_page.dart';
+import '../features/electricity/models/linky_models.dart';
+import '../features/electricity/today/today_page.dart';
 import '../shared/shared_widgets.dart';
 import 'app_settings.dart';
+import 'smart_house_hub_page.dart';
 
 class SmartHouseApp extends StatelessWidget {
   const SmartHouseApp({
@@ -30,7 +31,7 @@ class SmartHouseApp extends StatelessWidget {
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'SmartHouse Linky',
+      title: 'SmartHouse',
       locale: const Locale('fr', 'FR'),
       supportedLocales: const [Locale('fr', 'FR')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
@@ -68,6 +69,7 @@ class SmartHouseHome extends StatefulWidget {
 }
 
 class _SmartHouseHomeState extends State<SmartHouseHome> {
+  var _showElectricity = false;
   var _selectedIndex = 0;
   late String _apiBaseUrl;
   late LinkyRepository _repository;
@@ -101,6 +103,16 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_showElectricity) {
+      return SmartHouseHubPage(
+        onOpenElectricity: () {
+          setState(() {
+            _showElectricity = true;
+          });
+        },
+      );
+    }
+
     final page = switch (_selectedIndex) {
       0 => EnergyDashboardPage(
         key: ValueKey('today-page-$_apiBaseUrl'),
@@ -120,6 +132,18 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
     };
 
     return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          onPressed: () {
+            setState(() {
+              _showElectricity = false;
+            });
+          },
+          tooltip: 'Accueil',
+          icon: const Icon(Icons.home_outlined),
+        ),
+        title: const Text('Électricité'),
+      ),
       body: page,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,

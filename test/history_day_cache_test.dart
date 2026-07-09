@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:smarthouse/data/history_day_cache.dart';
+import 'package:smarthouse/features/electricity/data/history_day_cache.dart';
 
 void main() {
   test('stores and reads a completed history day', () async {

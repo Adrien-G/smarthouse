@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:smarthouse/app/smart_house_app.dart';
-import 'package:smarthouse/data/mock_linky_repository.dart';
+import 'package:smarthouse/features/electricity/data/mock_linky_repository.dart';
 
 void main() {
   testWidgets('today dashboard renders key Linky metrics', (tester) async {
@@ -11,6 +11,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('SmartHouse'), findsOneWidget);
+    expect(find.text('Électricité'), findsOneWidget);
+
+    await tester.tap(find.text('Électricité'));
+    await tester.pumpAndSettle();
+
     expect(find.text("Aujourd'hui"), findsWidgets);
     expect(find.text('Heures pleines'), findsOneWidget);
     expect(find.text('Heures creuses'), findsOneWidget);

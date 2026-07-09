@@ -2,9 +2,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../../data/api_linky_repository.dart';
-import '../../models/linky_models.dart';
-import '../../shared/shared_widgets.dart';
+import '../../../shared/shared_widgets.dart';
+import '../data/api_linky_repository.dart';
+import '../models/linky_models.dart';
 import '../today/today_page.dart';
 
 enum HistoryRange { day, week, month }
