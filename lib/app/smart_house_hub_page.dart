@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 
 class SmartHouseHubPage extends StatelessWidget {
-  const SmartHouseHubPage({super.key, required this.onOpenElectricity});
+  const SmartHouseHubPage({
+    super.key,
+    required this.onOpenElectricity,
+    required this.onOpenKitchen,
+  });
 
   final VoidCallback onOpenElectricity;
+  final VoidCallback onOpenKitchen;
 
   @override
   Widget build(BuildContext context) {
@@ -30,11 +35,12 @@ class SmartHouseHubPage extends StatelessWidget {
                     color: const Color(0xff1f7a5c),
                     onTap: onOpenElectricity,
                   ),
-                  const _FeatureCard(
+                  _FeatureCard(
                     icon: Icons.restaurant,
                     title: 'Cuisine',
-                    subtitle: 'À venir',
-                    color: Color(0xff9a5b13),
+                    subtitle: 'Recettes, planning et courses',
+                    color: const Color(0xff9a5b13),
+                    onTap: onOpenKitchen,
                   ),
                 ];
 

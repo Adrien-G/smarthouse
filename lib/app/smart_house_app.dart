@@ -7,6 +7,7 @@ import '../features/electricity/history/history_page.dart';
 import '../features/electricity/instant/instant_page.dart';
 import '../features/electricity/models/linky_models.dart';
 import '../features/electricity/today/today_page.dart';
+import '../features/kitchen/kitchen_page.dart';
 import '../shared/shared_widgets.dart';
 import 'app_settings.dart';
 import 'smart_house_hub_page.dart';
@@ -69,7 +70,7 @@ class SmartHouseHome extends StatefulWidget {
 }
 
 class _SmartHouseHomeState extends State<SmartHouseHome> {
-  var _showElectricity = false;
+  _SmartHouseModule? _activeModule;
   var _selectedIndex = 0;
   late String _apiBaseUrl;
   late LinkyRepository _repository;
@@ -103,11 +104,26 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_showElectricity) {
+    if (_activeModule == null) {
       return SmartHouseHubPage(
         onOpenElectricity: () {
           setState(() {
-            _showElectricity = true;
+            _activeModule = _SmartHouseModule.electricity;
+          });
+        },
+        onOpenKitchen: () {
+          setState(() {
+            _activeModule = _SmartHouseModule.kitchen;
+          });
+        },
+      );
+    }
+
+    if (_activeModule == _SmartHouseModule.kitchen) {
+      return KitchenPage(
+        onBackToHub: () {
+          setState(() {
+            _activeModule = null;
           });
         },
       );
@@ -136,7 +152,7 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
         leading: IconButton(
           onPressed: () {
             setState(() {
-              _showElectricity = false;
+              _activeModule = null;
             });
           },
           tooltip: 'Accueil',
@@ -173,3 +189,5 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
     );
   }
 }
+
+enum _SmartHouseModule { electricity, kitchen }
