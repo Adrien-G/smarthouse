@@ -12,7 +12,16 @@ class KitchenPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Theme(
       data: AppTheme.lightTheme,
-      child: HomeScreen(onBackToHub: onBackToHub),
+      child: Navigator(
+        onGenerateRoute: (settings) {
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (context) {
+              return HomeScreen(onBackToHub: onBackToHub);
+            },
+          );
+        },
+      ),
     );
   }
 }

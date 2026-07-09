@@ -26,7 +26,14 @@ class SmartHouseHubPage extends StatelessWidget {
             const SizedBox(height: 22),
             LayoutBuilder(
               builder: (context, constraints) {
-                final twoColumns = constraints.maxWidth >= 720;
+                const spacing = 12.0;
+                final columns = constraints.maxWidth >= 960
+                    ? 3
+                    : constraints.maxWidth >= 640
+                    ? 2
+                    : 1;
+                final cardWidth =
+                    (constraints.maxWidth - spacing * (columns - 1)) / columns;
                 final cards = [
                   _FeatureCard(
                     icon: Icons.bolt,
@@ -42,25 +49,32 @@ class SmartHouseHubPage extends StatelessWidget {
                     color: const Color(0xff9a5b13),
                     onTap: onOpenKitchen,
                   ),
+                  const _FeatureCard(
+                    icon: Icons.directions_bus,
+                    title: 'Transport',
+                    subtitle: 'À venir',
+                    color: Color(0xff2563eb),
+                  ),
+                  const _FeatureCard(
+                    icon: Icons.device_thermostat,
+                    title: 'Pièce de vie',
+                    subtitle: 'Température et humidité des pièces',
+                    color: Color(0xff7c3aed),
+                  ),
+                  const _FeatureCard(
+                    icon: Icons.settings,
+                    title: 'Paramètres',
+                    subtitle: 'Configuration globale',
+                    color: Color(0xff475569),
+                  ),
                 ];
 
-                if (!twoColumns) {
-                  return Column(
-                    children: [
-                      for (final card in cards) ...[
-                        card,
-                        if (card != cards.last) const SizedBox(height: 12),
-                      ],
-                    ],
-                  );
-                }
-
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                return Wrap(
+                  spacing: spacing,
+                  runSpacing: spacing,
                   children: [
-                    Expanded(child: cards.first),
-                    const SizedBox(width: 12),
-                    Expanded(child: cards.last),
+                    for (final card in cards)
+                      SizedBox(width: cardWidth, child: card),
                   ],
                 );
               },
