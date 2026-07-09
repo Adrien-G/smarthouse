@@ -144,16 +144,38 @@ def merge_config(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, An
 
 
 def read_current_measurement() -> Optional[dict[str, Any]]:
-    files = sorted(data_directory().glob(f"{file_prefix()}*.txt"))
+    realtime = read_measurements_from_file(realtime_path())
+    if realtime:
+        return realtime[-1]
+
+    files = sorted(
+        data_directory().glob(f"{file_prefix()}*.txt"),
+        key=history_file_sort_key,
+        reverse=True,
+    )
     if not files:
         return None
 
-    for path in reversed(files):
+    for path in files:
         history = read_measurements_from_file(path)
         if history:
             return history[-1]
 
     return None
+
+
+def history_file_sort_key(path: Path) -> datetime:
+    name = path.name
+    prefix = file_prefix()
+    suffix = ".txt"
+    if name.startswith(prefix) and name.endswith(suffix):
+        raw_date = name[len(prefix) : -len(suffix)]
+        try:
+            return datetime.strptime(raw_date, date_format())
+        except ValueError:
+            pass
+
+    return datetime.fromtimestamp(path.stat().st_mtime)
 
 
 def read_history(date: Optional[str], resolution: str = "raw") -> list[dict[str, Any]]:
@@ -178,7 +200,7 @@ def read_realtime(duration: str = "30m", resolution: str = "raw") -> list[dict[s
     minutes = parse_duration_minutes(duration)
     end = datetime.now()
     start = end - timedelta(minutes=minutes)
-    rows = read_history(None, "raw")
+    rows = read_measurements_from_file(realtime_path())
     selected = [
         row
         for row in rows
@@ -387,6 +409,9 @@ def normalize_tempo_color(value: Any) -> str:
 
 
 def read_measurements_from_file(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+
     with path.open("r", encoding="utf-8", newline="") as file:
         reader = csv.DictReader(file, delimiter=";")
         if not reader.fieldnames or "timestamp" not in reader.fieldnames:
@@ -448,6 +473,12 @@ def first_query_value(params: dict[str, list[str]], key: str) -> Optional[str]:
 def data_directory() -> Path:
     config = load_config()
     return Path(config["storage"]["directory"])
+
+
+def realtime_path() -> Path:
+    config = load_config()
+    filename = config["storage"].get("realtime_filename", "realtime.txt")
+    return data_directory() / filename
 
 
 def file_prefix() -> str:

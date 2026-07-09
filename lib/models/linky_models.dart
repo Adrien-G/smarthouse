@@ -135,9 +135,7 @@ class HourlyConsumption {
 
 abstract class LinkyRepository {
   Future<LinkySnapshot> fetchCurrentSnapshot();
-  Future<LinkySnapshot> fetchCachedCurrentSnapshot();
   Future<LinkySnapshot> fetchDailySnapshot(DateTime date);
-  Future<LinkySnapshot> fetchCachedDailySnapshot(DateTime date);
   Future<InstantConsumptionSnapshot> fetchInstantConsumption();
 }
 
@@ -157,15 +155,6 @@ class PhaseInstantPoint {
   int get totalVa => phase1Va + phase2Va + phase3Va;
 }
 
-class CachedHourlyHistory {
-  const CachedHourlyHistory({required this.rows});
-
-  final List<Map<String, dynamic>> rows;
-
-  bool get isEmpty => rows.isEmpty;
-  bool get isCompleteDay => rows.length >= 24;
-}
-
 class InstantConsumptionSnapshot {
   const InstantConsumptionSnapshot({
     required this.updatedAt,
@@ -177,8 +166,6 @@ class InstantConsumptionSnapshot {
 
   PhaseInstantPoint? get latest => points.isEmpty ? null : points.last;
 }
-
-final showLegacyMetrics = DateTime.now().year == 0;
 
 class LinkyLoadState {
   const LinkyLoadState.connecting() : message = 'Connexion au Raspberry...';

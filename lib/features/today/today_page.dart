@@ -12,13 +12,11 @@ class EnergyDashboardPage extends StatefulWidget {
     required this.apiBaseUrl,
     required this.repository,
     required this.onChangeApiBaseUrl,
-    required this.onClearCache,
   });
 
   final String apiBaseUrl;
   final LinkyRepository repository;
   final ValueChanged<String> onChangeApiBaseUrl;
-  final Future<void> Function() onClearCache;
 
   @override
   State<EnergyDashboardPage> createState() => _EnergyDashboardPageState();
@@ -34,31 +32,7 @@ class _EnergyDashboardPageState extends State<EnergyDashboardPage> {
   @override
   void initState() {
     super.initState();
-    _loadTodayOnStartup();
-  }
-
-  Future<void> _loadTodayOnStartup() async {
-    _updateLoadState(const LinkyLoadState.loadingPeriod('du cache local'));
-    try {
-      final snapshot = await widget.repository.fetchCachedCurrentSnapshot();
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _snapshot = snapshot;
-        _error = null;
-        _loadingInitial = false;
-      });
-      await _refresh(showInitialLoading: false);
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _error = error;
-      });
-      await _refresh(showInitialLoading: true);
-    }
+    _refresh(showInitialLoading: true);
   }
 
   Future<void> _refresh({bool showInitialLoading = false}) async {
@@ -125,19 +99,6 @@ class _EnergyDashboardPageState extends State<EnergyDashboardPage> {
     widget.onChangeApiBaseUrl(value);
   }
 
-  Future<void> _clearCache() async {
-    await widget.onClearCache();
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _snapshot = null;
-      _error = null;
-      _loadingInitial = true;
-    });
-    await _refresh(showInitialLoading: true);
-  }
-
   @override
   Widget build(BuildContext context) {
     final snapshot = _snapshot;
@@ -156,7 +117,6 @@ class _EnergyDashboardPageState extends State<EnergyDashboardPage> {
                 error: _error,
                 onRetry: () => _refresh(showInitialLoading: true),
                 onChangeApiBaseUrl: _changeApiBaseUrl,
-                onClearCache: _clearCache,
               );
             }
 
@@ -165,7 +125,6 @@ class _EnergyDashboardPageState extends State<EnergyDashboardPage> {
               apiBaseUrl: widget.apiBaseUrl,
               onRefresh: () => _refresh(showInitialLoading: false),
               onChangeApiBaseUrl: _changeApiBaseUrl,
-              onClearCache: _clearCache,
               isRefreshing: _refreshing,
               refreshError: _error,
             );
@@ -182,7 +141,6 @@ class _DashboardContent extends StatelessWidget {
     required this.apiBaseUrl,
     required this.onRefresh,
     required this.onChangeApiBaseUrl,
-    required this.onClearCache,
     required this.isRefreshing,
     required this.refreshError,
   });
@@ -191,13 +149,11 @@ class _DashboardContent extends StatelessWidget {
   final String apiBaseUrl;
   final Future<void> Function() onRefresh;
   final ValueChanged<String> onChangeApiBaseUrl;
-  final Future<void> Function() onClearCache;
   final bool isRefreshing;
   final Object? refreshError;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final width = MediaQuery.sizeOf(context).width;
     final compact = width < 720;
 
@@ -214,15 +170,13 @@ class _DashboardContent extends StatelessWidget {
             apiBaseUrl: apiBaseUrl,
             onRefresh: onRefresh,
             onChangeApiBaseUrl: onChangeApiBaseUrl,
-            onClearCache: onClearCache,
             isRefreshing: isRefreshing,
           ),
           const SizedBox(height: 18),
           if (refreshError != null) ...[
             InlineStatusMessage(
               icon: Icons.cloud_off,
-              message:
-                  'Dernière actualisation impossible, affichage du cache conservé.',
+              message: 'Dernière actualisation impossible, affichage conservé.',
             ),
             const SizedBox(height: 12),
           ],
@@ -232,51 +186,6 @@ class _DashboardContent extends StatelessWidget {
           const SizedBox(height: 14),
           _TomorrowTempoCard(snapshot: snapshot),
           const SizedBox(height: 18),
-          if (showLegacyMetrics)
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                _MetricTile(
-                  icon: Icons.bolt,
-                  label: 'Puissance instantanée',
-                  value: '${snapshot.currentPowerKw.toStringAsFixed(2)} kW',
-                  detail: '${snapshot.powerVa} VA',
-                  color: const Color(0xffd97706),
-                ),
-                _MetricTile(
-                  icon: Icons.today,
-                  label: "Aujourd'hui",
-                  value:
-                      '${snapshot.dailyConsumptionKwh.toStringAsFixed(2)} kWh',
-                  detail: snapshot.tempoToday.label,
-                  color: snapshot.tempoToday.accent,
-                ),
-                _MetricTile(
-                  icon: Icons.calendar_month,
-                  label: 'Mois en cours',
-                  value:
-                      '${snapshot.monthlyConsumptionKwh.toStringAsFixed(1)} kWh',
-                  detail: 'Index local',
-                  color: const Color(0xff4f46e5),
-                ),
-                _MetricTile(
-                  icon: Icons.speed,
-                  label: 'Abonnement',
-                  value: '${snapshot.subscribedPowerKva} kVA',
-                  detail: '${(snapshot.loadRatio * 100).round()} % utilisé',
-                  color: const Color(0xff0f766e),
-                ),
-              ],
-            ),
-          const SizedBox(height: 22),
-          if (showLegacyMetrics)
-            SectionHeader(
-              title: 'Consommation horaire',
-              subtitle: 'Données locales reçues depuis le compteur',
-              trailing: Text('24 h', style: theme.textTheme.labelLarge),
-            ),
-          if (showLegacyMetrics) const SizedBox(height: 12),
           if (snapshot.missingPastHours.isNotEmpty) ...[
             InlineStatusMessage(
               icon: Icons.manage_search,
@@ -307,7 +216,6 @@ class _Header extends StatelessWidget {
     required this.apiBaseUrl,
     required this.onRefresh,
     required this.onChangeApiBaseUrl,
-    required this.onClearCache,
     required this.isRefreshing,
   });
 
@@ -315,7 +223,6 @@ class _Header extends StatelessWidget {
   final String apiBaseUrl;
   final VoidCallback onRefresh;
   final ValueChanged<String> onChangeApiBaseUrl;
-  final Future<void> Function() onClearCache;
   final bool isRefreshing;
 
   @override
@@ -369,51 +276,11 @@ class _Header extends StatelessWidget {
             context: context,
             currentValue: apiBaseUrl,
             onSubmitted: onChangeApiBaseUrl,
-            onClearCache: onClearCache,
           ),
           tooltip: 'Configurer',
           icon: const Icon(Icons.settings),
         ),
       ],
-    );
-  }
-}
-
-// ignore: unused_element
-class _ConnectionBanner extends StatelessWidget {
-  const _ConnectionBanner({required this.snapshot, required this.apiBaseUrl});
-
-  final LinkySnapshot snapshot;
-  final String apiBaseUrl;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xffe7f4ee),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xffb7dec8)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: Row(
-          children: [
-            const Icon(Icons.check_circle, color: Color(0xff15803d)),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Connecté à $apiBaseUrl - dernière mesure à ${formatTime(snapshot.timestamp)}',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xff14532d),
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -470,22 +337,6 @@ class _TodaySummaryHero extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                if (showLegacyMetrics)
-                  Text(
-                    'Coût estimé : ${snapshot.dailyEnergyCostEuro.toStringAsFixed(2)} €',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.9),
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                if (showLegacyMetrics) const SizedBox(height: 2),
-                if (showLegacyMetrics)
-                  Text(
-                    'Énergie seule depuis 00:00',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.78),
-                    ),
-                  ),
               ],
             );
 
@@ -567,121 +418,6 @@ class _TomorrowTempoCard extends StatelessWidget {
   }
 }
 
-// ignore: unused_element
-class _CompactMetrics extends StatelessWidget {
-  const _CompactMetrics({required this.snapshot});
-
-  final LinkySnapshot snapshot;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xffe1e5dc)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final compact = constraints.maxWidth < 520;
-            final children = [
-              _CompactMetricItem(
-                icon: Icons.bolt,
-                label: 'Puissance',
-                value: '${snapshot.currentPowerKw.toStringAsFixed(2)} kW',
-                detail: '${snapshot.powerVa} VA',
-                color: const Color(0xffd97706),
-              ),
-              _CompactMetricItem(
-                icon: Icons.calendar_month,
-                label: 'Index compteur',
-                value:
-                    '${snapshot.monthlyConsumptionKwh.toStringAsFixed(1)} kWh',
-                detail: 'Cumul total',
-                color: const Color(0xff4f46e5),
-              ),
-            ];
-
-            if (compact) {
-              return Column(
-                children: [
-                  children.first,
-                  const Divider(height: 18),
-                  children.last,
-                ],
-              );
-            }
-
-            return Row(
-              children: [
-                Expanded(child: children.first),
-                const SizedBox(height: 42, child: VerticalDivider(width: 18)),
-                Expanded(child: children.last),
-              ],
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _CompactMetricItem extends StatelessWidget {
-  const _CompactMetricItem({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.detail,
-    required this.color,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final String detail;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Row(
-      children: [
-        Icon(icon, color: color),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                value,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ],
-          ),
-        ),
-        Text(
-          detail,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _PeakOffPeakCard extends StatelessWidget {
   const _PeakOffPeakCard({required this.snapshot});
 
@@ -689,8 +425,6 @@ class _PeakOffPeakCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return DecoratedBox(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -702,22 +436,6 @@ class _PeakOffPeakCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (showLegacyMetrics)
-              Text(
-                'HP / HC depuis 00:00',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            if (showLegacyMetrics) const SizedBox(height: 4),
-            if (showLegacyMetrics)
-              Text(
-                'Répartition depuis 00:00, même si la couleur Tempo bascule à 06:00.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            if (showLegacyMetrics) const SizedBox(height: 10),
             LayoutBuilder(
               builder: (context, constraints) {
                 final compact = constraints.maxWidth < 520;
@@ -820,123 +538,6 @@ class _TariffConsumptionPill extends StatelessWidget {
   }
 }
 
-class _MetricTile extends StatelessWidget {
-  const _MetricTile({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.detail,
-    required this.color,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final String detail;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return SizedBox(
-      width: math.min(MediaQuery.sizeOf(context).width - 32, 260),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xffe1e5dc)),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(icon, color: color),
-              const SizedBox(height: 18),
-              Text(
-                label,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 6),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  value,
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(detail, style: theme.textTheme.bodySmall),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ignore: unused_element
-class _PowerGauge extends StatelessWidget {
-  const _PowerGauge({required this.snapshot});
-
-  final LinkySnapshot snapshot;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final ratio = snapshot.loadRatio.clamp(0.0, 1.0);
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xff18221f),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SectionHeader(
-              title: 'Charge actuelle',
-              subtitle: 'Comparée à la puissance souscrite',
-              inverse: true,
-              trailing: Icon(
-                Icons.electric_meter,
-                color: theme.colorScheme.primaryContainer,
-              ),
-            ),
-            const SizedBox(height: 18),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: LinearProgressIndicator(
-                minHeight: 16,
-                value: ratio,
-                backgroundColor: Colors.white.withValues(alpha: 0.16),
-                color: ratio > 0.8
-                    ? const Color(0xffef4444)
-                    : const Color(0xff7dd3a5),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              '${snapshot.powerVa} VA sur ${snapshot.subscribedPowerKva * 1000} VA',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: Colors.white.withValues(alpha: 0.82),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class HourlyChart extends StatefulWidget {
   const HourlyChart({super.key, required this.values});
 
@@ -1022,7 +623,7 @@ class _HourlyChartPainter extends CustomPainter {
   final Color labelColor;
 
   static const labelHeight = 24.0;
-  static const yAxisWidth = 56.0;
+  static const yAxisWidth = 64.0;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1034,7 +635,8 @@ class _HourlyChartPainter extends CustomPainter {
     final chartHeight = size.height - labelHeight;
     final chartWidth = size.width - yAxisWidth;
     final maxValue = values.map((e) => e.consumptionWh).reduce(math.max);
-    final scaleMax = math.max(100.0, maxValue.toDouble());
+    final scaleMax = _niceAxisMax(math.max(100.0, maxValue.toDouble()));
+    final axisUsesKwh = scaleMax >= 1000;
     final paint = Paint();
     final gridPaint = Paint()
       ..color = gridColor
@@ -1048,7 +650,7 @@ class _HourlyChartPainter extends CustomPainter {
       final value = scaleMax * (1 - ratio);
       _drawLabel(
         canvas,
-        _formatChartKwh(value),
+        _formatChartValue(value, useKwh: axisUsesKwh),
         Offset(yAxisLabelWidth / 2, y - 6),
         align: TextAlign.right,
         width: yAxisLabelWidth,
@@ -1122,7 +724,7 @@ class _HourlyChartPainter extends CustomPainter {
       anchor: Offset(centerX, top),
       lines: [
         '${entry.hour.hour}h',
-        _formatChartKwh(entry.consumptionWh.toDouble()),
+        _formatEnergyValue(entry.consumptionWh.toDouble()),
         entry.tempoColor.label,
       ],
       chartWidth: chartWidth,
@@ -1193,7 +795,32 @@ class _HourlyChartPainter extends CustomPainter {
     }
   }
 
-  String _formatChartKwh(double value) {
+  double _niceAxisMax(double value) {
+    if (value <= 250) {
+      return 250;
+    }
+    if (value <= 500) {
+      return 500;
+    }
+    if (value <= 750) {
+      return 750;
+    }
+    if (value <= 1000) {
+      return 1000;
+    }
+
+    final step = value <= 3000 ? 500.0 : 1000.0;
+    return (value / step).ceil() * step;
+  }
+
+  String _formatChartValue(double value, {required bool useKwh}) {
+    if (useKwh) {
+      return '${(value / 1000).toStringAsFixed(1)} kWh';
+    }
+    return '${value.round()} Wh';
+  }
+
+  String _formatEnergyValue(double value) {
     final kwh = value / 1000;
     if (kwh >= 1) {
       return '${kwh.toStringAsFixed(1)} kWh';
@@ -1218,69 +845,5 @@ class _HourlyChartPainter extends CustomPainter {
         oldDelegate.barColor != barColor ||
         oldDelegate.gridColor != gridColor ||
         oldDelegate.labelColor != labelColor;
-  }
-}
-
-// ignore: unused_element
-class _TempoBand extends StatelessWidget {
-  const _TempoBand({required this.snapshot});
-
-  final LinkySnapshot snapshot;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xffe1e5dc)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          alignment: WrapAlignment.spaceBetween,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            _TempoChip(label: "Aujourd'hui", color: snapshot.tempoToday),
-            _TempoChip(label: 'Demain', color: snapshot.tempoTomorrow),
-            const Text("Option Tempo prête à connecter à l'API EDF/RTE"),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TempoChip extends StatelessWidget {
-  const _TempoChip({required this.label, required this.color});
-
-  final String label;
-  final TempoDayColor color;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: color.accent,
-            shape: BoxShape.circle,
-          ),
-          child: const SizedBox(width: 12, height: 12),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          '$label : ${color.label}',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ],
-    );
   }
 }

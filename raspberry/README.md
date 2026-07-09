@@ -1,7 +1,7 @@
 # Raspberry Pi Linky
 
 Ce dossier contient la base du service local qui lit la sortie TIC Linky en mode
-standard et ecrit des fichiers journaliers.
+standard et ecrit deux exports locaux.
 
 ## Lancement
 
@@ -10,15 +10,23 @@ python3 -m pip install pyserial
 python3 linky_reader.py
 ```
 
-Le fichier `config.json` permet de changer le port serie, le dossier de sortie
-et le prefixe des fichiers sans modifier le script.
+Le fichier `config.json` permet de changer le port serie, le dossier de sortie,
+le prefixe des fichiers et la retention sans modifier le script.
 
 ## Format ecrit
 
-Le script conserve ton principe de fichiers journaliers :
+Le script ecrit deux fichiers complementaires.
+
+Historique durable, echantillonne par defaut a une trame toutes les 5 minutes :
 
 ```text
 /home/adrien/LinkyData/Stat_15-05-2026.txt
+```
+
+Temps reel, contenant toutes les trames sur une fenetre glissante de 3 heures :
+
+```text
+/home/adrien/LinkyData/realtime.txt
 ```
 
 Chaque ligne est maintenant un CSV separe par `;` avec un en-tete :
@@ -38,8 +46,16 @@ Si un fichier du jour existe deja avec l'ancien format prototype, le lecteur le
 renomme automatiquement en `.legacy` et recree un fichier propre avec l'en-tete
 CSV. Cela evite que l'API lise un melange d'anciens et de nouveaux formats.
 
-Ce format sera plus simple a exposer ensuite a Flutter via une petite API HTTP
-locale, tout en restant lisible a la main.
+Les parametres utiles dans `config.json` sont :
+
+```json
+"history_interval_minutes": 5,
+"realtime_filename": "realtime.txt",
+"realtime_retention_hours": 3
+```
+
+Ce format reste simple a exposer a Flutter via l'API HTTP locale, tout en
+restant lisible a la main.
 
 ## Suite prevue
 
@@ -84,8 +100,9 @@ minute  un point par minute
 hour    un point par heure
 ```
 
-L'application Flutter utilise `hour` par defaut pour eviter de charger toutes
-les mesures fines sur mobile.
+`/api/linky/history` lit le fichier journalier echantillonne. `/api/linky/current`
+et `/api/linky/realtime` utilisent le fichier glissant afin de garder une vision
+instantanee precise.
 
 ## Nom local raspberrypi.local
 

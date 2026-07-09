@@ -7,7 +7,7 @@ import '../../models/linky_models.dart';
 import '../../shared/shared_widgets.dart';
 import '../today/today_page.dart';
 
-enum HistoryRange { day, week }
+enum HistoryRange { day, week, month }
 
 sealed class _HistoryViewData {
   const _HistoryViewData();
@@ -93,53 +93,59 @@ class _HistoryPageState extends State<HistoryPage> {
   void initState() {
     super.initState();
     _repository = widget.repository;
-    _historyFuture = _loadSelectedRangeFromCache();
+    _historyFuture = _loadSelectedRange();
   }
 
   void _reload() {
     setState(() {
-      _historyFuture = _refreshSelectedRangeFromNetwork();
+      _historyFuture = _loadSelectedRange();
     });
   }
 
-  Future<_HistoryViewData> _loadSelectedRangeFromCache() async {
-    _updateLoadState(const LinkyLoadState.loadingPeriod('du cache local'));
-    if (_range == HistoryRange.week) {
-      return _loadWeek(fromNetwork: false);
-    }
-    return _HistoryDayData(
-      await _repository.fetchCachedDailySnapshot(_selectedDate),
-    );
-  }
-
-  Future<_HistoryViewData> _refreshSelectedRangeFromNetwork() async {
+  Future<_HistoryViewData> _loadSelectedRange() async {
     _updateLoadState(const LinkyLoadState.connecting());
-    if (_repository is ApiLinkyRepository) {
-      await (_repository as ApiLinkyRepository).checkHealth();
-    }
 
-    if (_range == HistoryRange.week) {
-      return _loadWeek(fromNetwork: true);
+    switch (_range) {
+      case HistoryRange.day:
+        _updateLoadState(
+          LinkyLoadState.loadingPeriod('du ${formatDate(_selectedDate)}'),
+        );
+        return _HistoryDayData(
+          await _repository.fetchDailySnapshot(_selectedDate),
+        );
+      case HistoryRange.week:
+        return _loadPeriod(
+          days: _weekDates(_selectedDate),
+          initialPeriodLabel: 'des 7 journées',
+          emptyMessage: 'Aucune donnée disponible sur la semaine',
+        );
+      case HistoryRange.month:
+        return _loadPeriod(
+          days: _monthDates(_selectedDate),
+          initialPeriodLabel: 'du mois',
+          emptyMessage: 'Aucune donnée disponible sur le mois',
+        );
     }
-    _updateLoadState(const LinkyLoadState.loadingPeriod('de la journée'));
-    return _HistoryDayData(await _repository.fetchDailySnapshot(_selectedDate));
   }
 
-  Future<_HistoryWeekData> _loadWeek({required bool fromNetwork}) async {
-    _updateLoadState(
-      LinkyLoadState.loadingPeriod(
-        fromNetwork ? 'des 7 journées' : 'de la semaine en cache',
-      ),
-    );
-    final days = _weekDates(_selectedDate);
+  Future<_HistoryWeekData> _loadPeriod({
+    required List<DateTime> days,
+    required String initialPeriodLabel,
+    required String emptyMessage,
+  }) async {
+    _updateLoadState(LinkyLoadState.loadingPeriod(initialPeriodLabel));
     final entries = <_HistoryWeekEntry>[];
     final missingDates = <DateTime>[];
 
-    for (final date in days) {
+    for (var index = 0; index < days.length; index++) {
+      final date = days[index];
+      _updateLoadState(
+        LinkyLoadState.loadingPeriod(
+          'du ${formatDate(date)} (${index + 1}/${days.length})',
+        ),
+      );
       try {
-        final snapshot = fromNetwork
-            ? await _repository.fetchDailySnapshot(date)
-            : await _repository.fetchCachedDailySnapshot(date);
+        final snapshot = await _repository.fetchDailySnapshot(date);
         entries.add(_HistoryWeekEntry(date: date, snapshot: snapshot));
       } catch (_) {
         missingDates.add(date);
@@ -147,7 +153,7 @@ class _HistoryPageState extends State<HistoryPage> {
     }
 
     if (entries.isEmpty) {
-      throw const LinkyApiException('Aucune donnée disponible sur la semaine');
+      throw LinkyApiException(emptyMessage);
     }
 
     return _HistoryWeekData(
@@ -164,6 +170,29 @@ class _HistoryPageState extends State<HistoryPage> {
     return [
       for (var offset = 0; offset < 7; offset++)
         monday.add(Duration(days: offset)),
+    ];
+  }
+
+  List<DateTime> _monthDates(DateTime selectedDate) {
+    final now = DateTime.now();
+    final firstDay = DateTime(selectedDate.year, selectedDate.month);
+    final lastDayOfMonth = DateTime(
+      selectedDate.year,
+      selectedDate.month + 1,
+      0,
+    );
+    final endDay =
+        selectedDate.year == now.year && selectedDate.month == now.month
+        ? DateTime(now.year, now.month, now.day)
+        : lastDayOfMonth;
+
+    return [
+      for (
+        var date = firstDay;
+        !date.isAfter(endDay);
+        date = date.add(const Duration(days: 1))
+      )
+        date,
     ];
   }
 
@@ -190,7 +219,7 @@ class _HistoryPageState extends State<HistoryPage> {
 
     setState(() {
       _selectedDate = picked;
-      _historyFuture = _loadSelectedRangeFromCache();
+      _historyFuture = _loadSelectedRange();
     });
   }
 
@@ -216,7 +245,7 @@ class _HistoryPageState extends State<HistoryPage> {
                 onRangeChanged: (range) {
                   setState(() {
                     _range = range;
-                    _historyFuture = _loadSelectedRangeFromCache();
+                    _historyFuture = _loadSelectedRange();
                   });
                 },
                 onPickDate: _pickDate,
@@ -316,6 +345,11 @@ class _HistoryControls extends StatelessWidget {
               value: HistoryRange.week,
               icon: Icon(Icons.view_week),
               label: Text('Semaine'),
+            ),
+            ButtonSegment(
+              value: HistoryRange.month,
+              icon: Icon(Icons.calendar_month),
+              label: Text('Mois'),
             ),
           ],
           selected: {range},
@@ -470,7 +504,7 @@ class _HistoryWeekContent extends StatelessWidget {
           InlineStatusMessage(
             icon: Icons.info_outline,
             message:
-                '${data.missingDates.length} jour(s) sans données sur cette semaine.',
+                '${data.missingDates.length} jour(s) sans données sur cette période.',
           ),
         ],
         const SizedBox(height: 22),
@@ -600,6 +634,7 @@ class _WeekBars extends StatelessWidget {
     final maxWh = entries
         .map((entry) => entry.snapshot.dailyConsumptionWh)
         .fold<int>(0, math.max);
+    final dense = entries.length > 10;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -611,17 +646,37 @@ class _WeekBars extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(14, 16, 14, 12),
         child: SizedBox(
           height: 210,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              for (final entry in entries) ...[
-                Expanded(
-                  child: _WeekBar(entry: entry, maxWh: maxWh),
+          child: dense
+              ? SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      for (final entry in entries) ...[
+                        SizedBox(
+                          width: 46,
+                          child: _WeekBar(
+                            entry: entry,
+                            maxWh: maxWh,
+                            dense: true,
+                          ),
+                        ),
+                        if (entry != entries.last) const SizedBox(width: 6),
+                      ],
+                    ],
+                  ),
+                )
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    for (final entry in entries) ...[
+                      Expanded(
+                        child: _WeekBar(entry: entry, maxWh: maxWh),
+                      ),
+                      if (entry != entries.last) const SizedBox(width: 8),
+                    ],
+                  ],
                 ),
-                if (entry != entries.last) const SizedBox(width: 8),
-              ],
-            ],
-          ),
         ),
       ),
     );
@@ -629,10 +684,15 @@ class _WeekBars extends StatelessWidget {
 }
 
 class _WeekBar extends StatelessWidget {
-  const _WeekBar({required this.entry, required this.maxWh});
+  const _WeekBar({
+    required this.entry,
+    required this.maxWh,
+    this.dense = false,
+  });
 
   final _HistoryWeekEntry entry;
   final int maxWh;
+  final bool dense;
 
   @override
   Widget build(BuildContext context) {
@@ -643,10 +703,14 @@ class _WeekBar extends StatelessWidget {
     return Column(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        Text(
-          '${entry.snapshot.dailyConsumptionKwh.toStringAsFixed(1)} kWh',
-          style: theme.textTheme.labelSmall?.copyWith(
-            fontWeight: FontWeight.w800,
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            '${entry.snapshot.dailyConsumptionKwh.toStringAsFixed(1)} kWh',
+            maxLines: 1,
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ),
         const SizedBox(height: 6),
@@ -665,7 +729,9 @@ class _WeekBar extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          _shortWeekday(entry.date),
+          dense
+              ? entry.date.day.toString().padLeft(2, '0')
+              : _shortWeekday(entry.date),
           style: theme.textTheme.labelSmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
             fontWeight: FontWeight.w800,

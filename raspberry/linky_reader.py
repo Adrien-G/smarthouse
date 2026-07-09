@@ -1,10 +1,9 @@
 import argparse
 import csv
 import json
-import os
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from sys import exit
 from typing import Any, Optional
@@ -65,6 +64,9 @@ class StorageSettings:
     directory: Path
     file_prefix: str
     date_format: str
+    history_interval_minutes: int
+    realtime_filename: str
+    realtime_retention_hours: int
 
 
 @dataclass(frozen=True)
@@ -108,6 +110,13 @@ def load_config(path: Path) -> AppConfig:
             directory=Path(storage_config["directory"]),
             file_prefix=storage_config["file_prefix"],
             date_format=storage_config["date_format"],
+            history_interval_minutes=int(
+                storage_config.get("history_interval_minutes", 5)
+            ),
+            realtime_filename=storage_config.get("realtime_filename", "realtime.txt"),
+            realtime_retention_hours=int(
+                storage_config.get("realtime_retention_hours", 3)
+            ),
         ),
     )
 
@@ -125,6 +134,9 @@ class LinkyReader:
         self.serial = self._open_serial(config.serial)
         self.current_frame: dict[str, Any] = {}
         self.has_started = False
+        self.last_history_path: Optional[Path] = None
+        self.last_history_timestamp: Optional[datetime] = None
+        self.last_realtime_cleanup: Optional[datetime] = None
 
     def run(self) -> None:
         try:
@@ -159,7 +171,13 @@ class LinkyReader:
 
     def write_frame(self, frame: dict[str, Any]) -> None:
         self.config.storage.directory.mkdir(parents=True, exist_ok=True)
-        path = self.output_path()
+        self.append_frame(self.realtime_path(), frame)
+        self.cleanup_realtime_file(frame)
+
+        if self.should_write_history_frame(frame):
+            self.append_frame(self.output_path(), frame)
+
+    def append_frame(self, path: Path, frame: dict[str, Any]) -> None:
         ensure_csv_header_compatible(path)
         write_header = not path.exists() or path.stat().st_size == 0
 
@@ -169,10 +187,66 @@ class LinkyReader:
                 writer.writeheader()
             writer.writerow({field: frame.get(field, "") for field in CSV_FIELDS})
 
+    def should_write_history_frame(self, frame: dict[str, Any]) -> bool:
+        timestamp = parse_iso_datetime(frame.get("timestamp"))
+        if timestamp is None:
+            return False
+
+        path = self.output_path()
+        if self.last_history_path != path:
+            self.last_history_path = path
+            self.last_history_timestamp = latest_timestamp_from_csv(path)
+
+        interval = timedelta(minutes=self.config.storage.history_interval_minutes)
+        if (
+            self.last_history_timestamp is not None
+            and timestamp < self.last_history_timestamp + interval
+        ):
+            return False
+
+        self.last_history_timestamp = timestamp
+        return True
+
+    def cleanup_realtime_file(self, frame: dict[str, Any]) -> None:
+        timestamp = parse_iso_datetime(frame.get("timestamp")) or datetime.now()
+        if (
+            self.last_realtime_cleanup is not None
+            and timestamp < self.last_realtime_cleanup + timedelta(minutes=1)
+        ):
+            return
+
+        self.last_realtime_cleanup = timestamp
+        path = self.realtime_path()
+        if not path.exists():
+            return
+
+        cutoff = timestamp - timedelta(
+            hours=self.config.storage.realtime_retention_hours
+        )
+        with path.open("r", encoding="utf-8", newline="") as file:
+            reader = csv.DictReader(file, delimiter=";")
+            if not reader.fieldnames or "timestamp" not in reader.fieldnames:
+                return
+            rows = [row for row in reader if is_row_after_cutoff(row, cutoff)]
+
+        temporary_path = path.with_suffix(f"{path.suffix}.tmp")
+        with temporary_path.open("w", encoding="utf-8", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=CSV_FIELDS, delimiter=";")
+            writer.writeheader()
+            writer.writerows(
+                {field: row.get(field, "") for field in CSV_FIELDS}
+                for row in rows
+            )
+
+        temporary_path.replace(path)
+
     def output_path(self) -> Path:
         file_date = datetime.now().strftime(self.config.storage.date_format)
         filename = f"{self.config.storage.file_prefix}{file_date}.txt"
         return self.config.storage.directory / filename
+
+    def realtime_path(self) -> Path:
+        return self.config.storage.directory / self.config.storage.realtime_filename
 
     @staticmethod
     def _open_serial(settings: SerialSettings) -> serial.Serial:
@@ -249,6 +323,28 @@ def ensure_csv_header_compatible(path: Path) -> None:
     path.rename(backup_path)
 
 
+def latest_timestamp_from_csv(path: Path) -> Optional[datetime]:
+    if not path.exists() or path.stat().st_size == 0:
+        return None
+
+    with path.open("r", encoding="utf-8", newline="") as file:
+        reader = csv.DictReader(file, delimiter=";")
+        if not reader.fieldnames or "timestamp" not in reader.fieldnames:
+            return None
+
+        latest: Optional[datetime] = None
+        for row in reader:
+            timestamp = parse_iso_datetime(row.get("timestamp"))
+            if timestamp is not None:
+                latest = timestamp
+        return latest
+
+
+def is_row_after_cutoff(row: dict[str, str], cutoff: datetime) -> bool:
+    timestamp = parse_iso_datetime(row.get("timestamp"))
+    return timestamp is not None and timestamp >= cutoff
+
+
 def parse_linky_date(value: str) -> str:
     raw = value.strip()
     if len(raw) >= 13:
@@ -262,6 +358,16 @@ def parse_linky_date(value: str) -> str:
         return parsed.isoformat(timespec="seconds")
     except ValueError:
         return raw
+
+
+def parse_iso_datetime(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str):
+        return None
+
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def parse_int(value: str) -> int:

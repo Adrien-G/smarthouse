@@ -69,16 +69,6 @@ class MockLinkyRepository implements LinkyRepository {
   }
 
   @override
-  Future<LinkySnapshot> fetchCachedCurrentSnapshot() async {
-    return fetchCurrentSnapshot();
-  }
-
-  @override
-  Future<LinkySnapshot> fetchCachedDailySnapshot(DateTime date) async {
-    return fetchDailySnapshot(date);
-  }
-
-  @override
   Future<InstantConsumptionSnapshot> fetchInstantConsumption() async {
     final now = DateTime.now();
     return InstantConsumptionSnapshot(

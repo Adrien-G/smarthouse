@@ -3,7 +3,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../../data/detected_devices.dart';
 import '../../models/linky_models.dart';
 import '../../shared/shared_widgets.dart';
 
@@ -18,7 +17,6 @@ class InstantConsumptionPage extends StatefulWidget {
 
 class _InstantConsumptionPageState extends State<InstantConsumptionPage> {
   InstantConsumptionSnapshot? _snapshot;
-  List<DetectedDevice> _devices = const [];
   Object? _error;
   var _loadingInitial = true;
   var _refreshing = false;
@@ -27,19 +25,8 @@ class _InstantConsumptionPageState extends State<InstantConsumptionPage> {
   @override
   void initState() {
     super.initState();
-    _loadDevices();
     _refresh(showInitialLoading: true);
     _timer = Timer.periodic(const Duration(seconds: 10), (_) => _refresh());
-  }
-
-  Future<void> _loadDevices() async {
-    final devices = await DetectedDeviceStore.load();
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _devices = devices;
-    });
   }
 
   @override
@@ -136,7 +123,7 @@ class _InstantConsumptionPageState extends State<InstantConsumptionPage> {
               ),
               const SizedBox(height: 12),
             ],
-            _InstantContent(snapshot: snapshot, devices: _devices),
+            _InstantContent(snapshot: snapshot),
           ],
         ],
       ),
@@ -201,10 +188,9 @@ class _InstantHeader extends StatelessWidget {
 }
 
 class _InstantContent extends StatelessWidget {
-  const _InstantContent({required this.snapshot, required this.devices});
+  const _InstantContent({required this.snapshot});
 
   final InstantConsumptionSnapshot snapshot;
-  final List<DetectedDevice> devices;
 
   @override
   Widget build(BuildContext context) {
@@ -253,8 +239,6 @@ class _InstantContent extends StatelessWidget {
           height: 280,
           child: _InstantPhasesChart(points: snapshot.points),
         ),
-        const SizedBox(height: 12),
-        _PossibleDevicesCard(latest: latest, devices: devices),
       ],
     );
   }
@@ -301,187 +285,6 @@ String _formatInstantWatts(int watts) {
     return '${(watts / 1000).toStringAsFixed(2)} kW';
   }
   return '$watts W';
-}
-
-class _PossibleDevicesCard extends StatelessWidget {
-  const _PossibleDevicesCard({required this.latest, required this.devices});
-
-  final PhaseInstantPoint latest;
-  final List<DetectedDevice> devices;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final matches = _possibleMatches();
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xffe1e5dc)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.electrical_services, color: Color(0xff1f7a5c)),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Appareils possiblement allumes',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            if (devices.isEmpty)
-              Text(
-                'Enregistre quelques appareils pour les comparer a la puissance actuelle.',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              )
-            else if (matches.isEmpty)
-              Text(
-                'Aucun appareil enregistre ne ressort clairement sur la mesure actuelle.',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              )
-            else
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final match in matches.take(3))
-                    _PossibleDeviceChip(match: match),
-                ],
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  List<_PossibleDeviceMatch> _possibleMatches() {
-    final matches = <_PossibleDeviceMatch>[];
-    final observed = [latest.phase1Va, latest.phase2Va, latest.phase3Va];
-
-    for (final device in devices) {
-      final expected = [
-        math.max(0, device.phase1W),
-        math.max(0, device.phase2W),
-        math.max(0, device.phase3W),
-      ];
-      final expectedTotal = expected.fold<int>(0, (sum, value) => sum + value);
-      if (expectedTotal < 50) {
-        continue;
-      }
-
-      var deficit = 0;
-      for (var index = 0; index < expected.length; index++) {
-        deficit += math.max(0, expected[index] - observed[index]);
-      }
-
-      final allowedDeficit = math.max(120, expectedTotal * 0.35);
-      if (deficit > allowedDeficit) {
-        continue;
-      }
-
-      final score = (1 - deficit / math.max(1, expectedTotal)) * 100;
-      matches.add(
-        _PossibleDeviceMatch(
-          device: device,
-          score: score.clamp(0, 100).round(),
-          expectedW: expectedTotal,
-        ),
-      );
-    }
-
-    matches.sort((left, right) => right.score.compareTo(left.score));
-    return matches;
-  }
-}
-
-class _PossibleDeviceChip extends StatelessWidget {
-  const _PossibleDeviceChip({required this.match});
-
-  final _PossibleDeviceMatch match;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xfff6f7f3),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xffe1e5dc)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(_confidenceIcon, size: 18, color: _confidenceColor),
-            const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  match.device.name,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                Text(
-                  '${_formatInstantWatts(match.expectedW)} - ${match.confidenceLabel}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  IconData get _confidenceIcon {
-    return match.score >= 85 ? Icons.check_circle : Icons.help_outline;
-  }
-
-  Color get _confidenceColor {
-    return match.score >= 85
-        ? const Color(0xff047857)
-        : const Color(0xffb45309);
-  }
-}
-
-class _PossibleDeviceMatch {
-  const _PossibleDeviceMatch({
-    required this.device,
-    required this.score,
-    required this.expectedW,
-  });
-
-  final DetectedDevice device;
-  final int score;
-  final int expectedW;
-
-  String get confidenceLabel {
-    if (score >= 85) {
-      return 'probable';
-    }
-    return 'possible';
-  }
 }
 
 class _InstantPhasesChart extends StatefulWidget {

@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../data/api_linky_repository.dart';
-import '../data/hourly_history_cache.dart';
-import '../features/devices/device_detection_page.dart';
+import '../data/history_day_cache.dart';
 import '../features/history/history_page.dart';
 import '../features/instant/instant_page.dart';
 import '../features/today/today_page.dart';
@@ -15,14 +14,14 @@ class SmartHouseApp extends StatelessWidget {
   const SmartHouseApp({
     super.key,
     this.repository,
-    this.hourlyHistoryCache,
+    this.historyDayCache,
     this.settings = const AppSettings(
       apiBaseUrl: ApiLinkyRepository.defaultBaseUrl,
     ),
   });
 
   final LinkyRepository? repository;
-  final HourlyHistoryCache? hourlyHistoryCache;
+  final HistoryDayCache? historyDayCache;
   final AppSettings settings;
 
   @override
@@ -46,7 +45,7 @@ class SmartHouseApp extends StatelessWidget {
       home: SmartHouseHome(
         initialApiBaseUrl: settings.apiBaseUrl,
         repository: repository,
-        hourlyHistoryCache: hourlyHistoryCache,
+        historyDayCache: historyDayCache,
       ),
     );
   }
@@ -57,12 +56,12 @@ class SmartHouseHome extends StatefulWidget {
     super.key,
     required this.initialApiBaseUrl,
     this.repository,
-    this.hourlyHistoryCache,
+    this.historyDayCache,
   });
 
   final String initialApiBaseUrl;
   final LinkyRepository? repository;
-  final HourlyHistoryCache? hourlyHistoryCache;
+  final HistoryDayCache? historyDayCache;
 
   @override
   State<SmartHouseHome> createState() => _SmartHouseHomeState();
@@ -81,7 +80,7 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
         widget.repository ??
         ApiLinkyRepository(
           baseUrl: _apiBaseUrl,
-          hourlyHistoryCache: widget.hourlyHistoryCache,
+          historyDayCache: widget.historyDayCache,
         );
   }
 
@@ -95,19 +94,7 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
           widget.repository ??
           ApiLinkyRepository(
             baseUrl: normalized,
-            hourlyHistoryCache: widget.hourlyHistoryCache,
-          );
-    });
-  }
-
-  Future<void> _clearCache() async {
-    await widget.hourlyHistoryCache?.clearAll();
-    setState(() {
-      _repository =
-          widget.repository ??
-          ApiLinkyRepository(
-            baseUrl: _apiBaseUrl,
-            hourlyHistoryCache: widget.hourlyHistoryCache,
+            historyDayCache: widget.historyDayCache,
           );
     });
   }
@@ -120,14 +107,9 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
         apiBaseUrl: _apiBaseUrl,
         repository: _repository,
         onChangeApiBaseUrl: _changeApiBaseUrl,
-        onClearCache: _clearCache,
       ),
       1 => InstantConsumptionPage(
         key: ValueKey('instant-page-$_apiBaseUrl'),
-        repository: _repository,
-      ),
-      2 => DeviceDetectionPage(
-        key: ValueKey('devices-page-$_apiBaseUrl'),
         repository: _repository,
       ),
       _ => HistoryPage(
@@ -156,11 +138,6 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
             icon: Icon(Icons.show_chart),
             selectedIcon: Icon(Icons.show_chart),
             label: 'Instantané',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.electrical_services_outlined),
-            selectedIcon: Icon(Icons.electrical_services),
-            label: 'Appareils',
           ),
           NavigationDestination(
             icon: Icon(Icons.bar_chart_outlined),

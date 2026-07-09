@@ -10,7 +10,10 @@
   "storage": {
     "directory": "/home/adrien/LinkyData",
     "file_prefix": "Stat_",
-    "date_format": "%d-%m-%Y"
+    "date_format": "%d-%m-%Y",
+    "history_interval_minutes": 5,
+    "realtime_filename": "realtime.txt",
+    "realtime_retention_hours": 3
   },
   "linky": {
     "phase_count": 3,
