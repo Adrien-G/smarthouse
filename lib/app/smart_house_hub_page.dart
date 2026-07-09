@@ -5,10 +5,14 @@ class SmartHouseHubPage extends StatelessWidget {
     super.key,
     required this.onOpenElectricity,
     required this.onOpenKitchen,
+    required this.onOpenTransport,
+    required this.onOpenSettings,
   });
 
   final VoidCallback onOpenElectricity;
   final VoidCallback onOpenKitchen;
+  final VoidCallback onOpenTransport;
+  final VoidCallback onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -49,23 +53,25 @@ class SmartHouseHubPage extends StatelessWidget {
                     color: const Color(0xff9a5b13),
                     onTap: onOpenKitchen,
                   ),
-                  const _FeatureCard(
+                  _FeatureCard(
                     icon: Icons.directions_bus,
                     title: 'Transport',
-                    subtitle: 'À venir',
-                    color: Color(0xff2563eb),
+                    subtitle: 'TER et bus',
+                    color: const Color(0xff2563eb),
+                    onTap: onOpenTransport,
                   ),
                   const _FeatureCard(
                     icon: Icons.device_thermostat,
-                    title: 'Pièce de vie',
+                    title: 'Confort intérieur',
                     subtitle: 'Température et humidité des pièces',
                     color: Color(0xff7c3aed),
                   ),
-                  const _FeatureCard(
+                  _FeatureCard(
                     icon: Icons.settings,
                     title: 'Paramètres',
                     subtitle: 'Configuration globale',
-                    color: Color(0xff475569),
+                    color: const Color(0xff475569),
+                    onTap: onOpenSettings,
                   ),
                 ];
 

@@ -8,6 +8,8 @@ import '../features/electricity/instant/instant_page.dart';
 import '../features/electricity/models/linky_models.dart';
 import '../features/electricity/today/today_page.dart';
 import '../features/kitchen/kitchen_page.dart';
+import '../features/settings/settings_page.dart';
+import '../features/transports/transports_page.dart';
 import '../shared/shared_widgets.dart';
 import 'app_settings.dart';
 import 'smart_house_hub_page.dart';
@@ -46,6 +48,7 @@ class SmartHouseApp extends StatelessWidget {
       ),
       home: SmartHouseHome(
         initialApiBaseUrl: settings.apiBaseUrl,
+        initialNavitiaApiKey: settings.navitiaApiKey,
         repository: repository,
         historyDayCache: historyDayCache,
       ),
@@ -57,11 +60,13 @@ class SmartHouseHome extends StatefulWidget {
   const SmartHouseHome({
     super.key,
     required this.initialApiBaseUrl,
+    required this.initialNavitiaApiKey,
     this.repository,
     this.historyDayCache,
   });
 
   final String initialApiBaseUrl;
+  final String initialNavitiaApiKey;
   final LinkyRepository? repository;
   final HistoryDayCache? historyDayCache;
 
@@ -73,12 +78,14 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
   _SmartHouseModule? _activeModule;
   var _selectedIndex = 0;
   late String _apiBaseUrl;
+  late String _navitiaApiKey;
   late LinkyRepository _repository;
 
   @override
   void initState() {
     super.initState();
     _apiBaseUrl = widget.initialApiBaseUrl;
+    _navitiaApiKey = widget.initialNavitiaApiKey;
     _repository =
         widget.repository ??
         ApiLinkyRepository(
@@ -89,7 +96,10 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
 
   Future<void> _changeApiBaseUrl(String value) async {
     final normalized = normalizeApiBaseUrlValue(value);
-    await AppSettings(apiBaseUrl: normalized).save();
+    await AppSettings(
+      apiBaseUrl: normalized,
+      navitiaApiKey: _navitiaApiKey,
+    ).save();
 
     setState(() {
       _apiBaseUrl = normalized;
@@ -99,6 +109,14 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
             baseUrl: normalized,
             historyDayCache: widget.historyDayCache,
           );
+    });
+  }
+
+  Future<void> _changeNavitiaApiKey(String value) async {
+    await AppSettings(apiBaseUrl: _apiBaseUrl, navitiaApiKey: value).save();
+
+    setState(() {
+      _navitiaApiKey = value;
     });
   }
 
@@ -116,11 +134,49 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
             _activeModule = _SmartHouseModule.kitchen;
           });
         },
+        onOpenTransport: () {
+          setState(() {
+            _activeModule = _SmartHouseModule.transport;
+          });
+        },
+        onOpenSettings: () {
+          setState(() {
+            _activeModule = _SmartHouseModule.settings;
+          });
+        },
       );
     }
 
     if (_activeModule == _SmartHouseModule.kitchen) {
       return KitchenPage(
+        onBackToHub: () {
+          setState(() {
+            _activeModule = null;
+          });
+        },
+      );
+    }
+
+    if (_activeModule == _SmartHouseModule.transport) {
+      return TransportsPage(
+        navitiaApiKey: _navitiaApiKey,
+        onBackToHub: () {
+          setState(() {
+            _activeModule = null;
+          });
+        },
+        onOpenSettings: () {
+          setState(() {
+            _activeModule = _SmartHouseModule.settings;
+          });
+        },
+      );
+    }
+
+    if (_activeModule == _SmartHouseModule.settings) {
+      return SettingsPage(
+        navitiaApiKey: _navitiaApiKey,
+        onChangeNavitiaApiKey: _changeNavitiaApiKey,
         onBackToHub: () {
           setState(() {
             _activeModule = null;
@@ -190,4 +246,4 @@ class _SmartHouseHomeState extends State<SmartHouseHome> {
   }
 }
 
-enum _SmartHouseModule { electricity, kitchen }
+enum _SmartHouseModule { electricity, kitchen, transport, settings }
