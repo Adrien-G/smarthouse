@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../controllers/cuisine_controller.dart';
 import '../data/meal_slots.dart';
 import '../models/recipe.dart';
+import '../services/recipe_discovery_service.dart';
 import '../services/storage_service.dart';
 import 'backup_screen.dart';
 import 'import_recipe_screen.dart';
@@ -12,7 +13,7 @@ import 'recipe_form_screen.dart';
 import 'recipes_screen.dart';
 import 'shopping_list_screen.dart';
 
-enum AddRecipeMode { manual, importText, importUrl }
+enum AddRecipeMode { manual, importText, importUrl, popularMarmiton }
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, this.onBackToHub});
@@ -160,6 +161,18 @@ class _HomeScreenState extends State<HomeScreen> {
                     },
                   ),
                 ),
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.auto_awesome_outlined),
+                    title: const Text('Me proposer un plat'),
+                    subtitle: const Text(
+                      'Importer un plat Marmiton populaire pas encore présent.',
+                    ),
+                    onTap: () {
+                      Navigator.of(context).pop(AddRecipeMode.popularMarmiton);
+                    },
+                  ),
+                ),
               ],
             ),
           ),
@@ -174,8 +187,93 @@ class _HomeScreenState extends State<HomeScreen> {
         await openImportRecipeFlow();
       case AddRecipeMode.importUrl:
         await openImportRecipeUrlFlow();
+      case AddRecipeMode.popularMarmiton:
+        await openPopularMarmitonRecipeFlow();
       case null:
         return;
+    }
+  }
+
+  Future<void> openPopularMarmitonRecipeFlow() async {
+    Recipe draftRecipe;
+
+    try {
+      draftRecipe = await runWithLoadingDialog(
+        message: 'Recherche d’un plat bien noté...',
+        task: () {
+          return RecipeDiscoveryService.importPopularMarmitonRecipe(
+            existingRecipes: cuisineController.recipes,
+          );
+        },
+      );
+    } on RecipeDiscoveryException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      showSnackBar(error.message);
+      return;
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      showSnackBar('Impossible de récupérer un plat Marmiton pour le moment.');
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    final newRecipe = await Navigator.of(context).push<Recipe>(
+      MaterialPageRoute(
+        builder: (context) {
+          return RecipeFormScreen(initialRecipe: draftRecipe, isDraft: true);
+        },
+      ),
+    );
+
+    if (newRecipe == null) {
+      return;
+    }
+
+    await addRecipe(newRecipe);
+  }
+
+  Future<T> runWithLoadingDialog<T>({
+    required String message,
+    required Future<T> Function() task,
+  }) async {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return PopScope(
+          canPop: false,
+          child: AlertDialog(
+            content: Row(
+              children: [
+                const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                ),
+                const SizedBox(width: 16),
+                Expanded(child: Text(message)),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    try {
+      return await task();
+    } finally {
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
     }
   }
 
