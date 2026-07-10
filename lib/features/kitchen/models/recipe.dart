@@ -10,6 +10,7 @@ class Recipe {
     required this.ingredients,
     required this.steps,
     this.tags = const [],
+    this.sourceUrl,
     this.prepTimeMinutes,
     this.cookTimeMinutes,
     this.rating,
@@ -22,6 +23,7 @@ class Recipe {
   final List<Ingredient> ingredients;
   final String steps;
   final List<String> tags;
+  final String? sourceUrl;
 
   /// Temps actif : découper, mélanger, préparer, surveiller activement.
   final int? prepTimeMinutes;
@@ -53,6 +55,7 @@ class Recipe {
     List<Ingredient>? ingredients,
     String? steps,
     List<String>? tags,
+    String? sourceUrl,
     int? prepTimeMinutes,
     int? cookTimeMinutes,
     int? rating,
@@ -65,6 +68,7 @@ class Recipe {
       ingredients: ingredients ?? this.ingredients,
       steps: steps ?? this.steps,
       tags: tags ?? this.tags,
+      sourceUrl: sourceUrl ?? this.sourceUrl,
       prepTimeMinutes: prepTimeMinutes ?? this.prepTimeMinutes,
       cookTimeMinutes: cookTimeMinutes ?? this.cookTimeMinutes,
       rating: rating ?? this.rating,
@@ -82,6 +86,7 @@ class Recipe {
           .toList(),
       'steps': steps,
       'tags': tags,
+      'sourceUrl': sourceUrl,
       'prepTimeMinutes': prepTimeMinutes,
       'cookTimeMinutes': cookTimeMinutes,
       'rating': rating,
@@ -112,6 +117,7 @@ class Recipe {
       ingredients: ingredients,
       steps: json['steps'] as String,
       tags: List<String>.from(json['tags'] as List? ?? []),
+      sourceUrl: json['sourceUrl'] as String?,
 
       // Migration douce :
       // si l’ancienne durée existe, on la met en temps de préparation.

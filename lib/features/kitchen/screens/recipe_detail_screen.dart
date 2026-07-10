@@ -726,6 +726,39 @@ class _RecipeSummaryContent extends StatelessWidget {
               ),
           ],
         ),
+        if ((recipe.sourceUrl ?? '').isNotEmpty) ...[
+          const SizedBox(height: 10),
+          _SourceUrlSummaryRow(sourceUrl: recipe.sourceUrl!),
+        ],
+      ],
+    );
+  }
+}
+
+class _SourceUrlSummaryRow extends StatelessWidget {
+  const _SourceUrlSummaryRow({required this.sourceUrl});
+
+  final String sourceUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Icons.link, size: 20, color: colorScheme.primary),
+        const SizedBox(width: 8),
+        const SizedBox(
+          width: 78,
+          child: Text('Source', style: TextStyle(fontWeight: FontWeight.w800)),
+        ),
+        Expanded(
+          child: SelectableText(
+            sourceUrl,
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
+          ),
+        ),
       ],
     );
   }

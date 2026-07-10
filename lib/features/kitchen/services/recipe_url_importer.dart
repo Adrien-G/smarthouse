@@ -32,7 +32,7 @@ class RecipeUrlImporter {
       );
     }
 
-    return importFromHtml(response.body);
+    return importFromHtml(response.body).copyWith(sourceUrl: uri.toString());
   }
 
   static Recipe importFromHtml(String rawHtml) {

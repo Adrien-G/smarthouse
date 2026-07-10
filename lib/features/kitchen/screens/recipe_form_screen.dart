@@ -24,6 +24,7 @@ class _RecipeFormScreenState extends State<RecipeFormScreen> {
   final formKey = GlobalKey<FormState>();
 
   final nameController = TextEditingController();
+  final sourceUrlController = TextEditingController();
   final prepTimeController = TextEditingController();
   final cookTimeController = TextEditingController();
   final List<TextEditingController> stepControllers = [];
@@ -43,6 +44,7 @@ class _RecipeFormScreenState extends State<RecipeFormScreen> {
 
     if (initialRecipe != null) {
       nameController.text = initialRecipe.name;
+      sourceUrlController.text = initialRecipe.sourceUrl ?? '';
       prepTimeController.text = initialRecipe.prepTimeMinutes?.toString() ?? '';
       cookTimeController.text = initialRecipe.cookTimeMinutes?.toString() ?? '';
       for (final step in splitPreparationSteps(initialRecipe.steps)) {
@@ -77,6 +79,7 @@ class _RecipeFormScreenState extends State<RecipeFormScreen> {
   @override
   void dispose() {
     nameController.dispose();
+    sourceUrlController.dispose();
     prepTimeController.dispose();
     cookTimeController.dispose();
     for (final controller in stepControllers) {
@@ -311,6 +314,9 @@ class _RecipeFormScreenState extends State<RecipeFormScreen> {
       ingredients: ingredients,
       steps: preparationSteps.join('\n\n'),
       tags: buildOrderedTags(),
+      sourceUrl: sourceUrlController.text.trim().isEmpty
+          ? null
+          : sourceUrlController.text.trim(),
       prepTimeMinutes: parseTime(prepTimeController.text),
       cookTimeMinutes: parseTime(cookTimeController.text),
       rating: selectedRating,
@@ -356,6 +362,34 @@ class _RecipeFormScreenState extends State<RecipeFormScreen> {
                       validator: (value) {
                         if (value == null || value.trim().isEmpty) {
                           return 'Entre un nom de recette.';
+                        }
+
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: sourceUrlController,
+                      decoration: const InputDecoration(
+                        labelText: 'URL source',
+                        hintText: 'https://...',
+                        prefixIcon: Icon(Icons.link),
+                      ),
+                      keyboardType: TextInputType.url,
+                      textInputAction: TextInputAction.next,
+                      validator: (value) {
+                        final url = value?.trim() ?? '';
+
+                        if (url.isEmpty) {
+                          return null;
+                        }
+
+                        final uri = Uri.tryParse(url);
+
+                        if (uri == null ||
+                            !uri.hasScheme ||
+                            !uri.hasAuthority) {
+                          return 'Lien invalide';
                         }
 
                         return null;
